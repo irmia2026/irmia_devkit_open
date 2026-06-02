@@ -1,7 +1,7 @@
 {
   "admin_ids": {
-    "description": "允许使用开发工具箱的管理员 QQ",
-    "hint": "逗号分隔。未在此列表且不是 AstrBot 管理员的用户，无法调用本插件注册的任何工具。留空则仅允许 AstrBot 管理员使用。",
+    "description": "额外允许使用开发工具箱的 QQ",
+    "hint": "逗号分隔。插件会自动读取 AstrBot 管理员列表；此处仅填写额外允许用户。未在 AstrBot 管理员或此列表内的用户无法调用本插件注册的任何工具。",
     "type": "string",
     "default": ""
   },

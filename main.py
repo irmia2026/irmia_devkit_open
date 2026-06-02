@@ -121,6 +121,15 @@ class Main(star.Star):
             for x in _config.get("admin_ids", [])
             if str(x).strip()
         }
+        try:
+            astrbot_config = self.context.get_config()
+            allowed_ids.update(
+                str(x).strip()
+                for x in astrbot_config.get("admins_id", [])
+                if str(x).strip()
+            )
+        except Exception as exc:
+            logger.warning("弥亚开发工具箱读取 AstrBot 管理员列表失败：%s", exc)
         for tool in tools:
             original_call = tool.call
 

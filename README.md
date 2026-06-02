@@ -14,7 +14,7 @@ Python ≥ 3.10
 
 | 字段 | 说明 |
 |------|------|
-| `admin_ids` | 逗号分隔的允许使用开发工具箱的 QQ；留空则仅 AstrBot 管理员可用 |
+| `admin_ids` | 逗号分隔的额外允许 QQ；插件会自动读取 AstrBot 管理员列表 |
 | `tool_groups` | 9 组 bool 开关，`false` = 关闭整组 |
 | `disabled_tools` | 逗号分隔单独禁用的工具名 |
 | `es_path` | Everything CLI 路径，空自动检测 |
@@ -28,7 +28,7 @@ Python ≥ 3.10
 本插件包含文件系统、Git/GitHub、系统信息、网络请求和文件编辑/删除等开发工具。所有工具调用前会检查触发者身份：
 
 - AstrBot 管理员可调用。
-- `admin_ids` 中配置的 QQ 可调用。
+- `admin_ids` 中配置的额外 QQ 可调用。
 - 其他用户会被拒绝，避免群聊普通成员触发本机敏感工具。
 
 建议只在可信会话中启用，并谨慎开放文件系统、系统信息、网络和 Git/GitHub 工具组。
