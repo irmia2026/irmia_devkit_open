@@ -1,4 +1,10 @@
 {
+  "admin_ids": {
+    "description": "允许使用开发工具箱的管理员 QQ",
+    "hint": "逗号分隔。未在此列表且不是 AstrBot 管理员的用户，无法调用本插件注册的任何工具。留空则仅允许 AstrBot 管理员使用。",
+    "type": "string",
+    "default": ""
+  },
   "tool_groups": {
     "description": "工具组开关（关闭整组禁用该组所有工具，需重启生效）",
     "type": "object",

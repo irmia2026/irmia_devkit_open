@@ -17,6 +17,7 @@ from .tools import config as _tool_config
 from .tools._registry import TOOL_GROUPS, _ALL_TOOLS
 
 _DEFAULT_CONFIG = {
+    "admin_ids": [],
     "tool_groups": {g: True for g in TOOL_GROUPS},
     "disabled_tools": [],
     "es_path": "",
@@ -65,6 +66,17 @@ class Main(star.Star):
         # AstrBot WebUI 配置优先于 config.json
         if config:
             changed = False
+            admin_ids_raw = config.get("admin_ids", "")
+            if admin_ids_raw:
+                if isinstance(admin_ids_raw, list):
+                    _config["admin_ids"] = [
+                        str(x).strip() for x in admin_ids_raw if str(x).strip()
+                    ]
+                else:
+                    _config["admin_ids"] = [
+                        x.strip() for x in str(admin_ids_raw).split(",") if x.strip()
+                    ]
+                changed = True
             paths = config.get("paths", {})
             for key in ("es_path", "gh_path", "backup_dir"):
                 if paths.get(key):
@@ -104,5 +116,31 @@ class Main(star.Star):
             enabled.discard(t)
 
         tools = [_ALL_TOOLS[name]() for name in enabled if name in _ALL_TOOLS]
+        allowed_ids = {
+            str(x).strip()
+            for x in _config.get("admin_ids", [])
+            if str(x).strip()
+        }
+        for tool in tools:
+            original_call = tool.call
+
+            async def guarded_call(context, *args, _original_call=original_call, _tool=tool, **kwargs):
+                try:
+                    event = context.context.event
+                    sender_id = str(event.get_sender_id() or "").strip()
+                    is_admin = getattr(event, "role", "") == "admin"
+                    if not is_admin and sender_id not in allowed_ids:
+                        logger.warning(
+                            "弥亚开发工具箱拒绝未授权用户调用工具：sender=%s tool=%s",
+                            sender_id or "unknown",
+                            getattr(_tool, "name", "unknown"),
+                        )
+                        return "权限不足：弥亚开发工具箱仅允许配置的管理员 ID 或 AstrBot 管理员使用。"
+                except Exception as exc:
+                    logger.warning("弥亚开发工具箱权限检查失败，已拒绝工具调用：%s", exc)
+                    return "权限不足：弥亚开发工具箱权限检查失败，已拒绝工具调用。"
+                return await _original_call(context, *args, **kwargs)
+
+            tool.call = guarded_call
         context.add_llm_tools(*tools)
         logger.info(f"🔧 弥亚开发工具箱已就绪 — {len(tools)} 个工具注册完毕")
