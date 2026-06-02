@@ -19,6 +19,27 @@
     "type": "string",
     "default": ""
   },
+  "access_control": {
+    "description": "访问控制。默认仅允许 AstrBot 管理员调用 DevKit LLM 工具；可额外配置用户或会话白名单。",
+    "type": "object",
+    "items": {
+      "require_admin": {
+        "type": "bool",
+        "default": true,
+        "description": "是否要求调用者为 AstrBot 管理员。建议保持开启。"
+      },
+      "allowed_users": {
+        "type": "string",
+        "default": "",
+        "description": "额外允许调用 DevKit 工具的用户 ID，逗号分隔。"
+      },
+      "allowed_sessions": {
+        "type": "string",
+        "default": "",
+        "description": "额外允许调用 DevKit 工具的会话 unified_msg_origin/session_id，逗号分隔。"
+      }
+    }
+  },
   "paths": {
     "description": "外部工具路径（留空 = 自动检测）",
     "type": "object",

@@ -13,18 +13,54 @@ from astrbot.api import logger, star
 from astrbot.api.star import StarTools
 
 from .tools import config as _tool_config
+from .tools.permission_guard import protect_tool
 
 from .tools._registry import TOOL_GROUPS, _ALL_TOOLS
 
 _DEFAULT_CONFIG = {
     "tool_groups": {g: True for g in TOOL_GROUPS},
     "disabled_tools": [],
+    "access_control": {
+        "require_admin": True,
+        "allowed_users": [],
+        "allowed_sessions": [],
+    },
     "es_path": "",
     "gh_path": "",
     "state_dir": "",
     "lock_dirs": [],
     "backup_dir": "",
 }
+
+
+def _split_csv(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _merge_defaults(config: dict) -> dict:
+    merged = copy.deepcopy(_DEFAULT_CONFIG)
+    merged.update(config or {})
+    merged["tool_groups"] = {
+        **_DEFAULT_CONFIG["tool_groups"],
+        **(config or {}).get("tool_groups", {}),
+    }
+    merged["access_control"] = {
+        **_DEFAULT_CONFIG["access_control"],
+        **(config or {}).get("access_control", {}),
+    }
+    merged["access_control"]["allowed_users"] = _split_csv(
+        merged["access_control"].get("allowed_users", [])
+    )
+    merged["access_control"]["allowed_sessions"] = _split_csv(
+        merged["access_control"].get("allowed_sessions", [])
+    )
+    return merged
 
 
 class Main(star.Star):
@@ -62,6 +98,8 @@ class Main(star.Star):
             except Exception:
                 pass
 
+        _config = _merge_defaults(_config)
+
         # AstrBot WebUI 配置优先于 config.json
         if config:
             changed = False
@@ -83,6 +121,21 @@ class Main(star.Star):
             if web_disabled:
                 _config["disabled_tools"] = [t.strip() for t in web_disabled.split(",") if t.strip()]
                 changed = True
+
+            web_access_control = config.get("access_control", {})
+            if web_access_control and isinstance(web_access_control, dict):
+                access_control = _config.setdefault("access_control", {})
+                if "require_admin" in web_access_control:
+                    access_control["require_admin"] = bool(web_access_control["require_admin"])
+                    changed = True
+                if "allowed_users" in web_access_control:
+                    access_control["allowed_users"] = _split_csv(web_access_control.get("allowed_users"))
+                    changed = True
+                if "allowed_sessions" in web_access_control:
+                    access_control["allowed_sessions"] = _split_csv(web_access_control.get("allowed_sessions"))
+                    changed = True
+
+            _config = _merge_defaults(_config)
             if changed:
                 try:
                     os.makedirs(os.path.dirname(config_path), exist_ok=True)
@@ -103,6 +156,10 @@ class Main(star.Star):
         for t in disabled:
             enabled.discard(t)
 
-        tools = [_ALL_TOOLS[name]() for name in enabled if name in _ALL_TOOLS]
+        tools = [
+            protect_tool(_ALL_TOOLS[name](), _config)
+            for name in enabled
+            if name in _ALL_TOOLS
+        ]
         context.add_llm_tools(*tools)
         logger.info(f"🔧 弥亚开发工具箱已就绪 — {len(tools)} 个工具注册完毕")

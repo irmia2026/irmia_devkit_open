@@ -1,5 +1,5 @@
 {
-  "_comment": "弥亚开发工具箱配置。空值 = 自动检测。",
+  "_comment": "弥亚开发工具箱配置。空值 = 自动检测。默认仅允许 AstrBot 管理员或白名单调用 DevKit LLM 工具。",
   "tool_groups": {
     "安全编辑链": true,
     "Git & GitHub": true,
@@ -12,6 +12,11 @@
     "扩展": true
   },
   "disabled_tools": [],
+  "access_control": {
+    "require_admin": true,
+    "allowed_users": [],
+    "allowed_sessions": []
+  },
   "es_path": "",
   "gh_path": "",
   "state_dir": "",
