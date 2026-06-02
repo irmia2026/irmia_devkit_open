@@ -17,9 +17,7 @@ from .tools import config as _tool_config
 from .tools._registry import TOOL_GROUPS, _ALL_TOOLS
 
 _DEFAULT_CONFIG = {
-    "admin_ids": [],
     "tool_groups": {g: True for g in TOOL_GROUPS},
-    "disabled_tools": [],
     "es_path": "",
     "gh_path": "",
     "state_dir": "",
@@ -66,17 +64,6 @@ class Main(star.Star):
         # AstrBot WebUI 配置优先于 config.json
         if config:
             changed = False
-            admin_ids_raw = config.get("admin_ids", "")
-            if admin_ids_raw:
-                if isinstance(admin_ids_raw, list):
-                    _config["admin_ids"] = [
-                        str(x).strip() for x in admin_ids_raw if str(x).strip()
-                    ]
-                else:
-                    _config["admin_ids"] = [
-                        x.strip() for x in str(admin_ids_raw).split(",") if x.strip()
-                    ]
-                changed = True
             paths = config.get("paths", {})
             for key in ("es_path", "gh_path", "backup_dir"):
                 if paths.get(key):
@@ -91,10 +78,6 @@ class Main(star.Star):
                 for g, v in web_groups.items():
                     stored[g] = v
                 changed = True
-            web_disabled = config.get("disabled_tools", "")
-            if web_disabled:
-                _config["disabled_tools"] = [t.strip() for t in web_disabled.split(",") if t.strip()]
-                changed = True
             if changed:
                 try:
                     os.makedirs(os.path.dirname(config_path), exist_ok=True)
@@ -107,20 +90,13 @@ class Main(star.Star):
 
         # 过滤已启用的工具并注册
         tool_groups = _config.get("tool_groups", {})
-        disabled = _config.get("disabled_tools", [])
         enabled = set()
         for group, tool_names in TOOL_GROUPS.items():
             if tool_groups.get(group, True):
                 enabled.update(tool_names)
-        for t in disabled:
-            enabled.discard(t)
 
         tools = [_ALL_TOOLS[name]() for name in enabled if name in _ALL_TOOLS]
-        allowed_ids = {
-            str(x).strip()
-            for x in _config.get("admin_ids", [])
-            if str(x).strip()
-        }
+        allowed_ids = set()
         try:
             astrbot_config = self.context.get_config()
             allowed_ids.update(

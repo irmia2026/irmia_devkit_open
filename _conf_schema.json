@@ -1,10 +1,4 @@
 {
-  "admin_ids": {
-    "description": "额外允许使用开发工具箱的 QQ",
-    "hint": "逗号分隔。插件会自动读取 AstrBot 管理员列表；此处仅填写额外允许用户。未在 AstrBot 管理员或此列表内的用户无法调用本插件注册的任何工具。",
-    "type": "string",
-    "default": ""
-  },
   "tool_groups": {
     "description": "工具组开关（关闭整组禁用该组所有工具，需重启生效）",
     "type": "object",
@@ -19,11 +13,6 @@
       "时间": { "type": "bool", "default": true, "description": "⏱ 时间 — 时间戳/ISO互转/时间差" },
       "扩展": { "type": "bool", "default": true, "description": "🧩 扩展 — 项目初始化/变更日志/SVG/Schema/版本/UUID/DB/依赖" }
     }
-  },
-  "disabled_tools": {
-    "description": "单独禁用的工具名（逗号分隔，如 git_push,svg_render）",
-    "type": "string",
-    "default": ""
   },
   "paths": {
     "description": "外部工具路径（留空 = 自动检测）",

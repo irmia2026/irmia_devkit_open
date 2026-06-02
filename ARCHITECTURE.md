@@ -99,7 +99,7 @@ AstrBot loads plugin
             ├─ Reads config.json (→ data_dir or plugin_dir)
             ├─ Merges WebUI config (if present)
             ├─ Calls config.set_config() to inject global config
-            ├─ Filters tools: TOOL_GROUPS minus disabled_tools
+            ├─ Filters tools by enabled TOOL_GROUPS
             ├─ Instantiates enabled tool classes from _ALL_TOOLS
             └─ Calls context.add_llm_tools(*tools) to register with AstrBot
 ```

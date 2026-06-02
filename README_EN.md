@@ -17,7 +17,6 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 | Field | Description |
 |------|------|
 | `tool_groups` | 9 group bool switches (`false` = disable entire group) |
-| `disabled_tools` | Comma-separated names of individually disabled tools |
 | `es_path` | Everything CLI path (auto-detect if empty) |
 | `gh_path` | GitHub CLI path (auto-detect if empty) |
 | `backup_dir` | safe_edit backup directory (default: `~/.irmia/backups`) |
