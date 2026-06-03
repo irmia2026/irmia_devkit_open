@@ -72,6 +72,12 @@ class DevkitWebController:
         return str(getattr(self.plugin, "_group_configs_path", ""))
 
     @staticmethod
+    def _normalize_group_id(value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @staticmethod
     def _valid_group_id(group_id: str) -> bool:
         return bool(group_id) and len(group_id) <= 64
 
@@ -89,7 +95,7 @@ class DevkitWebController:
         return self._jsonify({"ok": True, "groups": groups})
 
     async def page_get_group_config(self):
-        group_id = str(self._request().args.get("group_id", "")).strip()
+        group_id = self._normalize_group_id(self._request().args.get("group_id", ""))
         if not self._valid_group_id(group_id):
             return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
         configs = self._read_group_configs()
@@ -98,7 +104,7 @@ class DevkitWebController:
 
     async def page_save_group_config(self):
         data = await self._request().get_json(force=True, silent=True) or {}
-        group_id = str(data.get("group_id", "")).strip()
+        group_id = self._normalize_group_id(data.get("group_id", ""))
         if not self._valid_group_id(group_id):
             return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
         raw_tool_groups = data.get("tool_groups", {})
@@ -148,12 +154,14 @@ class DevkitWebController:
                 for item in items:
                     if not isinstance(item, dict):
                         continue
-                    gid = str(item.get("group_id", "")).strip()
+                    gid = self._normalize_group_id(item.get("group_id", ""))
                     if not gid or gid in groups:
                         continue
                     name = str(item.get("group_name") or item.get("name") or f"群{gid}")
                     avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("group_avatar") or "")
                     groups[gid] = {"id": gid, "name": name, "avatar": avatar}
+            except AttributeError as exc:
+                logger.debug("devkit: 当前平台不支持 get_group_list: %s", exc)
             except Exception as exc:
                 logger.warning("devkit: 获取群列表失败: %s", exc)
         configs = self._read_group_configs()

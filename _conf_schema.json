@@ -11,7 +11,7 @@
     "default": ""
   },
   "group_config_enabled": {
-    "description": "启用群级工具箱权限配置。开启后可在 Web 管理面板为每个群独立设置管理员和工具组开关。默认关闭，不加载相关 Web 模块。",
+    "description": "启用群级工具箱权限配置。开启后可在 Web 管理面板为每个群独立设置管理员和工具组开关。默认关闭，不加载相关 Web 模块。（需重启生效）",
     "type": "bool",
     "default": false
   },
