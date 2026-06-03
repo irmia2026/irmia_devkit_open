@@ -11,12 +11,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def protect_tool(tool, allowed_ids):
-    """原地包裹 tool.call，注入管理员鉴权。
-
-    Returns:
-        原 tool 对象（call 已被替换）。
-    """
+def protect_tool(tool, allowed_ids, access_checker=None):
+    """原地包裹 tool.call，注入管理员鉴权。"""
     original_call = tool.call
 
     async def guarded_call(context, **kwargs):
@@ -25,10 +21,13 @@ def protect_tool(tool, allowed_ids):
             sender_id = str(event.get_sender_id() or "").strip()
             tool_name = tool.name
 
-            if (
-                event.is_admin()
-                or sender_id in allowed_ids
-            ):
+            allowed = False
+            if access_checker is not None:
+                try:
+                    allowed = bool(access_checker(event, tool_name))
+                except Exception:
+                    allowed = False
+            if allowed or event.is_admin() or sender_id in allowed_ids:
                 return await original_call(context, **kwargs)
 
             logger.warning(

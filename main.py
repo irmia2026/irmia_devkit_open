@@ -112,6 +112,9 @@ class Main(star.Star):
         allowed_ids = build_allowed_ids(context, _config)
         self._allowed_ids_cache = allowed_ids
 
+        self._group_configs_path = os.path.join(plug_dir, "data", "group_configs.json")
+        self._group_configs_cache = self._load_group_configs()
+
         tool_groups = _config.get("tool_groups", {})
         disabled = _config.get("disabled_tools", [])
         enabled = set()
@@ -122,23 +125,85 @@ class Main(star.Star):
             enabled.discard(t)
 
         tools = [_ALL_TOOLS[name]() for name in enabled if name in _ALL_TOOLS]
-        tools = [protect_tool(t, allowed_ids) for t in tools]
+        tools = [protect_tool(t, allowed_ids, self._is_tool_allowed_for_event) for t in tools]
         context.add_llm_tools(*tools)
         allowed_count = len(allowed_ids)
         logger.info(f"devkit ready — {len(tools)} tools registered, {allowed_count} allowed user{'s' if allowed_count != 1 else ''}")
 
+        # 注册 Web 配置页
+        self._register_web_page()
+
+    def _register_web_page(self) -> None:
+        try:
+            from .devkit_web import DevkitWebController
+            web = DevkitWebController(self.context, self)
+            web.register_routes()
+            logger.info("devkit Web 配置页已注册")
+        except Exception as exc:
+            logger.warning("devkit Web 配置页注册失败：%s", exc)
+
+    def _load_group_configs(self) -> dict:
+        try:
+            if os.path.exists(self._group_configs_path):
+                with open(self._group_configs_path, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            logger.warning("devkit group config 读取失败，已忽略")
+        return {}
+
+    @staticmethod
+    def _event_group_id(event: AstrMessageEvent) -> str:
+        try:
+            return str(event.get_group_id() or "").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _parse_ids(raw) -> set[str]:
+        if isinstance(raw, str):
+            return {x.strip() for x in raw.replace("，", ",").split(",") if x.strip()}
+        if isinstance(raw, list):
+            return {str(x).strip() for x in raw if str(x).strip()}
+        return set()
+
+    def _group_config_for_event(self, event: AstrMessageEvent) -> dict:
+        group_id = self._event_group_id(event)
+        if not group_id:
+            return {}
+        return self._group_configs_cache.get(group_id, {}) if isinstance(self._group_configs_cache, dict) else {}
+
+    def _is_group_extra_admin(self, event: AstrMessageEvent) -> bool:
+        sender_id = str(event.get_sender_id() or "").strip()
+        cfg = self._group_config_for_event(event)
+        return sender_id in self._parse_ids(cfg.get("extra_admin_ids", ""))
+
+    def _is_tool_group_enabled_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
+        cfg = self._group_config_for_event(event)
+        if not cfg:
+            return True
+        group_switches = cfg.get("tool_groups", {})
+        if not isinstance(group_switches, dict):
+            return True
+        for group_name, tool_names in TOOL_GROUPS.items():
+            if tool_name in tool_names:
+                return bool(group_switches.get(group_name, True))
+        return True
+
+    def _is_tool_allowed_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
+        if not self._is_tool_group_enabled_for_event(event, tool_name):
+            return False
+        return event.is_admin() or str(event.get_sender_id() or "").strip() in self._allowed_ids or self._is_group_extra_admin(event)
+
     @filter.on_llm_request()
     async def _auth_guard(self, event: AstrMessageEvent, req: ProviderRequest):
         sender_id = str(event.get_sender_id() or "").strip()
-        if sender_id in self._allowed_ids or event.is_admin():
-            return
-
         if req.func_tool:
             removed = []
             kept = []
             for tool in req.func_tool.tools:
                 mp = getattr(tool, "handler_module_path", "")
-                if mp and mp.startswith(_PLUGIN_MODULE_PREFIX):
+                if mp and mp.startswith(_PLUGIN_MODULE_PREFIX) and not self._is_tool_allowed_for_event(event, tool.name):
                     removed.append(tool.name)
                 else:
                     kept.append(tool)

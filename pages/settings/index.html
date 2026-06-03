@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>弥亚开发工具箱</title>
+<link rel="stylesheet" href="./styles.css?v=20260603_2300">
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h2>🛠️ 群聊配置</h2>
+    <p>为每个群单独配置工具权限</p>
+  </div>
+  <div class="group-list" id="groupList">
+    <!-- JS 动态填充 -->
+  </div>
+</div>
+
+<div class="main-content" id="mainContent">
+  <div class="empty-state" id="emptyState">
+    <div class="icon">🛠️</div>
+    <p>请从左侧选择一个群聊开始配置</p>
+  </div>
+  <div class="config-panel" id="configPanel" style="display:none">
+    <!-- JS 动态填充 -->
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="confirm-mask" id="confirmMask">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirmTitle">确认操作</div>
+    <div class="confirm-message" id="confirmMessage"></div>
+    <div class="confirm-actions">
+      <button class="btn btn-secondary" id="confirmCancelBtn">取消</button>
+      <button class="btn btn-primary" id="confirmOkBtn">确认</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./app.js?v=20260603_2300"></script>
+</body>
+</html>
