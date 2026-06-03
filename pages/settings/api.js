@@ -13,7 +13,7 @@ export function createApi(bridge) {
       Object.prototype.hasOwnProperty.call(response, "ok")
     ) {
       if (!response.ok) {
-        throw new Error(response.message || response.error || "Request failed");
+        throw new Error(response.error || response.message || "Request failed");
       }
       return Object.prototype.hasOwnProperty.call(response, "data")
         ? response.data

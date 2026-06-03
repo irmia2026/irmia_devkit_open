@@ -10,6 +10,11 @@ let selectedGroupId = null;
 let currentConfig = null;
 let globalAdminIds = [];
 
+function escapeHtml(value) {
+  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(value ?? "").replace(/[&<>"']/g, m => map[m]);
+}
+
 // ── 初始化 ──
 
 async function init() {
@@ -54,14 +59,14 @@ function renderGroupList() {
     item.onclick = () => selectGroup(g.id);
 
     const avatarHtml = g.avatar
-      ? `<img class="group-avatar" src="${g.avatar}" onerror="this.outerHTML='<div class=group-avatar-placeholder>💬</div>'">`
+      ? `<img class="group-avatar" src="${escapeHtml(g.avatar)}" onerror="this.outerHTML='<div class=group-avatar-placeholder>💬</div>'">`
       : `<div class="group-avatar-placeholder">💬</div>`;
 
     item.innerHTML = `
       ${avatarHtml}
       <div>
-        <div class="group-name">${g.name}</div>
-        <div class="group-id-tag">${g.id}</div>
+        <div class="group-name">${escapeHtml(g.name)}</div>
+        <div class="group-id-tag">${escapeHtml(g.id)}</div>
       </div>
     `;
     container.appendChild(item);
@@ -92,6 +97,7 @@ function renderConfigPanel() {
 
   const groupName = groupsData.find(g => g.id === selectedGroupId)?.name || `群${selectedGroupId}`;
   const adminIdsStr = globalAdminIds.join("、");
+  const extraAdminIds = currentConfig.extra_admin_ids || "";
 
   const cfgToolGroups = currentConfig.tool_groups || {};
   const allGroups = {};
@@ -105,11 +111,11 @@ function renderConfigPanel() {
     toolGroupRows += `
       <div class="tool-group-row">
         <div>
-          <span class="tool-group-name">${name}</span>
-          <span class="tool-group-count">(${tools.length} 工具)</span>
+          <span class="tool-group-name">${escapeHtml(name)}</span>
+          <span class="tool-group-count">(${escapeHtml(tools.length)} 工具)</span>
         </div>
         <label class="toggle">
-          <input type="checkbox" data-group="${name}" ${checked}>
+          <input type="checkbox" data-group="${escapeHtml(name)}" ${checked}>
           <div class="toggle-track"></div>
           <div class="toggle-thumb"></div>
         </label>
@@ -118,15 +124,15 @@ function renderConfigPanel() {
   }
 
   panel.innerHTML = `
-    <h3>${groupName}</h3>
-    <div class="subtitle">群号 ${selectedGroupId} · 独立配置工具权限</div>
+    <h3>${escapeHtml(groupName)}</h3>
+    <div class="subtitle">群号 ${escapeHtml(selectedGroupId)} · 独立配置工具权限</div>
 
-    <div class="admin-badge">🔒 全局管理员：${adminIdsStr || "未配置"}</div>
+    <div class="admin-badge">🔒 全局管理员：${escapeHtml(adminIdsStr || "未配置")}</div>
 
     <div class="card">
       <div class="card-title"><span class="emoji">👤</span> 额外管理员</div>
       <input class="input-field" id="extraAdminIds" type="text"
-        value="${currentConfig.extra_admin_ids || ""}"
+        value="${escapeHtml(extraAdminIds)}"
         placeholder="QQ 号，多个用逗号分隔">
       <div class="input-hint">额外允许使用开发者工具箱的用户 QQ 号（逗号分隔），不受全局管理员限制</div>
     </div>
@@ -210,6 +216,7 @@ async function saveConfig() {
       showToast("❌ 保存失败");
     }
   } catch (e) {
+    console.error("[Devkit] saveConfig", e);
     showToast("❌ 网络错误");
   }
 }
@@ -238,6 +245,7 @@ async function resetConfig() {
       await loadGroups();
     }
   } catch (e) {
+    console.error("[Devkit] resetConfig", e);
     showToast("❌ 网络错误");
   }
 }

@@ -5,9 +5,9 @@ devkit_web — 弥亚开发工具箱前端配置页 Web API。
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from typing import Any, cast
 
 from astrbot.api import logger
@@ -20,8 +20,6 @@ except ImportError:
     quart_jsonify = None
     quart_request_obj = None
 
-PLUGIN_DIR = Path(__file__).resolve().parent
-GROUP_CONFIG_FILE = PLUGIN_DIR / "data" / "group_configs.json"
 PLUGIN_NAME = "astrbot_plugin_irmia_devkit"
 
 
@@ -34,6 +32,7 @@ class DevkitWebController:
 
     def register_routes(self) -> None:
         if quart_jsonify is None:
+            logger.info("Quart 不可用，跳过 devkit Web 配置页注册")
             return
         routes = [
             ("/ping", self.page_ping, ["GET"], "Devkit ping"),
@@ -69,6 +68,13 @@ class DevkitWebController:
         wrapped.__name__ = handler.__name__
         return wrapped
 
+    def _group_config_file(self) -> str:
+        return str(getattr(self.plugin, "_group_configs_path", ""))
+
+    @staticmethod
+    def _valid_group_id(group_id: str) -> bool:
+        return bool(group_id) and len(group_id) <= 64
+
     # ── API ──
 
     async def page_ping(self):
@@ -84,25 +90,33 @@ class DevkitWebController:
 
     async def page_get_group_config(self):
         group_id = str(self._request().args.get("group_id", "")).strip()
-        if not group_id:
-            return self._jsonify({"ok": False, "error": "missing group_id"}), 400
+        if not self._valid_group_id(group_id):
+            return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
         configs = self._read_group_configs()
         cfg = configs.get(group_id, self._default_group_config(group_id))
         return self._jsonify({"ok": True, "config": cfg})
 
     async def page_save_group_config(self):
-        data = await self._request().get_json()
+        data = await self._request().get_json(force=True, silent=True) or {}
         group_id = str(data.get("group_id", "")).strip()
-        if not group_id:
-            return self._jsonify({"ok": False, "error": "missing group_id"}), 400
+        if not self._valid_group_id(group_id):
+            return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
+        raw_tool_groups = data.get("tool_groups", {})
+        if not isinstance(raw_tool_groups, dict):
+            raw_tool_groups = {}
+        clean = {
+            "group_id": group_id,
+            "extra_admin_ids": str(data.get("extra_admin_ids", "")).strip(),
+            "tool_groups": {str(k): bool(v) for k, v in raw_tool_groups.items()},
+            "updated_at": int(time.time()),
+        }
         configs = self._read_group_configs()
-        data["updated_at"] = int(time.time())
-        configs[group_id] = data
+        configs[group_id] = clean
         self._write_group_configs(configs)
-        try:
+        if hasattr(self.plugin, "_group_configs_cache"):
             self.plugin._group_configs_cache = configs
-        except Exception:
-            pass
+        else:
+            logger.warning("plugin 缺少 _group_configs_cache 属性，缓存未更新")
         return self._jsonify({"ok": True})
 
     async def page_global_admin_ids(self):
@@ -118,16 +132,10 @@ class DevkitWebController:
     async def _get_all_groups(self) -> list[dict[str, str]]:
         groups: dict[str, dict[str, str]] = {}
         try:
-            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_platform_adapter import AiocqhttpAdapter
-        except Exception:
-            AiocqhttpAdapter = None
-        try:
             platform_insts = self.context.platform_manager.platform_insts
         except Exception:
             platform_insts = []
         for inst in platform_insts:
-            if AiocqhttpAdapter is not None and not isinstance(inst, AiocqhttpAdapter):
-                continue
             try:
                 client = inst.get_client()
             except Exception:
@@ -143,15 +151,16 @@ class DevkitWebController:
                     gid = str(item.get("group_id", "")).strip()
                     if not gid or gid in groups:
                         continue
-                    name = str(item.get("group_name", f"群{gid}"))
-                    groups[gid] = {"id": gid, "name": name, "avatar": f"https://p.qlogo.cn/gh/{gid}/{gid}/100"}
+                    name = str(item.get("group_name") or item.get("name") or f"群{gid}")
+                    avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("group_avatar") or "")
+                    groups[gid] = {"id": gid, "name": name, "avatar": avatar}
             except Exception as exc:
-                logger.debug("devkit: 获取群列表失败: %s", exc)
+                logger.warning("devkit: 获取群列表失败: %s", exc)
         configs = self._read_group_configs()
         for gid, cfg in configs.items():
             updated_at = int(cfg.get("updated_at", 0)) if isinstance(cfg, dict) else 0
             if gid not in groups:
-                groups[gid] = {"id": gid, "name": f"群{gid}", "avatar": f"https://p.qlogo.cn/gh/{gid}/{gid}/100"}
+                groups[gid] = {"id": gid, "name": f"群{gid}", "avatar": ""}
             groups[gid]["updated_at"] = updated_at
         return sorted(groups.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("id") or "")))
 
@@ -162,17 +171,26 @@ class DevkitWebController:
         from .tools._registry import TOOL_GROUPS
         return {"group_id": group_id, "extra_admin_ids": "", "tool_groups": {g: True for g in TOOL_GROUPS}}
 
-    @staticmethod
-    def _read_group_configs() -> dict[str, Any]:
-        GROUP_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if GROUP_CONFIG_FILE.exists():
+    def _read_group_configs(self) -> dict[str, Any]:
+        config_file = self._group_config_file()
+        if not config_file:
+            return {}
+        if os.path.exists(config_file):
             try:
-                return json.loads(GROUP_CONFIG_FILE.read_text(encoding="utf-8-sig"))
+                with open(config_file, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                return data if isinstance(data, dict) else {}
             except Exception:
+                logger.warning("group_configs.json 读取失败，已重置为空")
                 return {}
         return {}
 
-    @staticmethod
-    def _write_group_configs(configs: dict[str, Any]) -> None:
-        GROUP_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        GROUP_CONFIG_FILE.write_text(json.dumps(configs, ensure_ascii=False, indent=2), encoding="utf-8")
+    def _write_group_configs(self, configs: dict[str, Any]) -> None:
+        config_file = self._group_config_file()
+        if not config_file:
+            raise RuntimeError("group config path is unavailable")
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        tmp = f"{config_file}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(configs, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, config_file)

@@ -1,16 +1,16 @@
-/* ── 弥亚开发工具箱配置页 — 浅粉色主题 ── */
+/* ── 弥亚开发工具箱配置页 — 蓝白主题 ── */
 
 :root {
-  --bg: #fff5f7;
+  --bg: #f5f8fc;
   --card: #ffffff;
-  --border: #f0d0d8;
-  --accent: #e8608a;
-  --accent-light: #fce4ec;
-  --accent-hover: #d4486e;
-  --text: #5c4048;
-  --text-light: #9e7c86;
-  --text-dark: #3d2832;
-  --shadow: 0 2px 12px rgba(232,96,138,0.08);
+  --border: #e2e8f0;
+  --accent: #3b82f6;
+  --accent-light: #eff6ff;
+  --accent-hover: #2563eb;
+  --text: #334155;
+  --text-light: #64748b;
+  --text-dark: #1e293b;
+  --shadow: 0 2px 12px rgba(59,130,246,0.08);
   --radius: 14px;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -24,7 +24,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .sidebar-header p { font-size: 12px; color: var(--text-light); margin-top: 4px; }
 .group-list { flex: 1; overflow-y: auto; padding: 10px 12px; }
 .group-item { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: var(--radius); cursor: pointer; transition: background 0.2s, transform 0.15s; margin-bottom: 6px; }
-.group-item:hover { background: rgba(232,96,138,0.12); }
+.group-item:hover { background: rgba(59,130,246,0.12); }
 .group-item.active { background: var(--accent); color: #fff; transform: scale(1.02); }
 .group-item.active .group-name { color: #fff; }
 .group-item.active .group-id-tag { color: rgba(255,255,255,0.7); }
@@ -59,14 +59,14 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
 .btn-secondary { background: var(--accent-light); color: var(--accent); }
-.btn-secondary:hover { background: rgba(232,96,138,0.2); }
+.btn-secondary:hover { background: rgba(59,130,246,0.2); }
 .btn-row { display: flex; gap: 12px; margin-top: 24px; }
-.toast { position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--accent); border-radius: var(--radius); padding: 14px 20px; font-size: 14px; color: var(--accent); box-shadow: 0 4px 16px rgba(232,96,138,0.15); transform: translateY(80px); opacity: 0; transition: transform 0.3s, opacity 0.3s; z-index: 999; }
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--accent); border-radius: var(--radius); padding: 14px 20px; font-size: 14px; color: var(--accent); box-shadow: 0 4px 16px rgba(59,130,246,0.15); transform: translateY(80px); opacity: 0; transition: transform 0.3s, opacity 0.3s; z-index: 999; }
 .toast.show { transform: translateY(0); opacity: 1; }
 .admin-badge { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-light); color: var(--accent); padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 500; margin-bottom: 12px; }
-.confirm-mask { position: fixed; inset: 0; background: rgba(80, 45, 58, 0.28); display: none; align-items: center; justify-content: center; z-index: 1000; }
+.confirm-mask { position: fixed; inset: 0; background: rgba(30, 41, 59, 0.28); display: none; align-items: center; justify-content: center; z-index: 1000; }
 .confirm-mask.show { display: flex; }
-.confirm-box { width: 340px; background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 18px 48px rgba(232,96,138,0.22); padding: 22px; }
+.confirm-box { width: 340px; background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 18px 48px rgba(59,130,246,0.22); padding: 22px; }
 .confirm-title { font-size: 17px; color: var(--text-dark); font-weight: 700; margin-bottom: 8px; }
 .confirm-message { font-size: 14px; color: var(--text); line-height: 1.6; margin-bottom: 18px; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }

@@ -27,7 +27,9 @@ def protect_tool(tool, allowed_ids, access_checker=None):
                     allowed = bool(access_checker(event, tool_name))
                 except Exception:
                     allowed = False
-            if allowed or event.is_admin() or sender_id in allowed_ids:
+            else:
+                allowed = event.is_admin() or sender_id in allowed_ids
+            if allowed:
                 return await original_call(context, **kwargs)
 
             logger.warning(

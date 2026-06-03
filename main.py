@@ -22,6 +22,7 @@ from .tools._auth import protect_tool, build_allowed_ids
 _DEFAULT_CONFIG = {
     "owner_sid": "",
     "allowed_ids": "",
+    "group_config_enabled": False,
     "tool_groups": {g: True for g in TOOL_GROUPS},
     "disabled_tools": [],
     "es_path": "",
@@ -48,6 +49,7 @@ class Main(star.Star):
                 raise ValueError("get_data_dir() returned falsy")
             config_path = os.path.join(str(data_dir), "config.json")
         except Exception:
+            data_dir = plug_dir
             config_path = os.path.join(plug_dir, "config.json")
         legacy_path = os.path.join(plug_dir, "config.json")
         if not os.path.exists(config_path) and os.path.exists(legacy_path):
@@ -79,6 +81,10 @@ class Main(star.Star):
             web_allowed = config.get("allowed_ids", "")
             if web_allowed:
                 _config["allowed_ids"] = web_allowed
+                changed = True
+            web_group_enabled = config.get("group_config_enabled", None)
+            if isinstance(web_group_enabled, bool):
+                _config["group_config_enabled"] = web_group_enabled
                 changed = True
             paths = config.get("paths", {})
             for key in ("es_path", "gh_path", "backup_dir"):
@@ -112,8 +118,9 @@ class Main(star.Star):
         allowed_ids = build_allowed_ids(context, _config)
         self._allowed_ids_cache = allowed_ids
 
-        self._group_configs_path = os.path.join(plug_dir, "data", "group_configs.json")
-        self._group_configs_cache = self._load_group_configs()
+        self._group_config_enabled = bool(_config.get("group_config_enabled", False))
+        self._group_configs_path = os.path.join(str(data_dir), "group_configs.json")
+        self._group_configs_cache = self._load_group_configs() if self._group_config_enabled else {}
 
         tool_groups = _config.get("tool_groups", {})
         disabled = _config.get("disabled_tools", [])
@@ -130,8 +137,8 @@ class Main(star.Star):
         allowed_count = len(allowed_ids)
         logger.info(f"devkit ready — {len(tools)} tools registered, {allowed_count} allowed user{'s' if allowed_count != 1 else ''}")
 
-        # 注册 Web 配置页
-        self._register_web_page()
+        if self._group_config_enabled:
+            self._register_web_page()
 
     def _register_web_page(self) -> None:
         try:
@@ -168,6 +175,8 @@ class Main(star.Star):
         return set()
 
     def _group_config_for_event(self, event: AstrMessageEvent) -> dict:
+        if not self._group_config_enabled:
+            return {}
         group_id = self._event_group_id(event)
         if not group_id:
             return {}
@@ -191,9 +200,11 @@ class Main(star.Star):
         return True
 
     def _is_tool_allowed_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
+        if event.is_admin():
+            return True
         if not self._is_tool_group_enabled_for_event(event, tool_name):
             return False
-        return event.is_admin() or str(event.get_sender_id() or "").strip() in self._allowed_ids or self._is_group_extra_admin(event)
+        return str(event.get_sender_id() or "").strip() in self._allowed_ids or self._is_group_extra_admin(event)
 
     @filter.on_llm_request()
     async def _auth_guard(self, event: AstrMessageEvent, req: ProviderRequest):

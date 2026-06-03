@@ -10,6 +10,11 @@
     "type": "string",
     "default": ""
   },
+  "group_config_enabled": {
+    "description": "启用群级工具箱权限配置。开启后可在 Web 管理面板为每个群独立设置管理员和工具组开关。默认关闭，不加载相关 Web 模块。",
+    "type": "bool",
+    "default": false
+  },
   "tool_groups": {
     "description": "工具组开关（关闭整组禁用该组所有工具，需重启生效）",
     "type": "object",
