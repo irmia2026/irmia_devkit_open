@@ -37,8 +37,9 @@ def split_command(cmd: str) -> list[str]:
         raise ValueError("cmd must not be empty")
     if any(part in cmd for part in _DANGEROUS_RAW):
         raise ValueError("command contains shell control characters")
+    import os
     try:
-        parts = shlex.split(cmd, posix=False)
+        parts = shlex.split(cmd, posix=(os.name != "nt"))
     except ValueError as exc:
         raise ValueError(f"invalid command syntax: {exc}") from exc
     cleaned = [p for p in parts if p.strip()]

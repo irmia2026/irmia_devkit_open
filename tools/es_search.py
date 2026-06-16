@@ -61,7 +61,10 @@ def _posix_search(
             loc_query = query.replace("*", "").replace("?", "")
             if not loc_query:
                 loc_query = query
-            args = [locate_path, "-l", str(max_results), "-i" if not case_sensitive else "", loc_query]
+            args = [locate_path, "-l", str(max_results)]
+            if not case_sensitive:
+                args.append("-i")
+            args.append(loc_query)
             args = [a for a in args if a]
             r = _run_cmd(args, timeout=10)
             if r["ok"] and r["stdout"]:

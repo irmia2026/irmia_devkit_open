@@ -30,6 +30,15 @@ def _find_gh() -> str:
     ]:
         if os.path.exists(guess):
             return guess
+    # Linux/macOS 常见安装位置
+    for guess in [
+        "/usr/bin/gh",
+        "/usr/local/bin/gh",
+        "/snap/bin/gh",
+        "/opt/homebrew/bin/gh",
+    ]:
+        if os.path.exists(guess):
+            return guess
     return "gh"
 
 
@@ -42,10 +51,11 @@ def _run_gh(args: list[str], cwd: str = None, timeout: int = 20) -> dict:
         if gh_bin != "gh":
             result["error"] = f"gh 未找到: {gh_bin}"
     if not result["ok"] and gh_bin == "gh":
+        install_tip = "winget install GitHub.cli" if os.name == "nt" else "apt install gh 或 brew install gh"
         result["error"] = (
             f"{result.get('error', 'gh 未找到')}。"
-            "如已安装 gh CLI，用 es_search('gh.exe') 找到路径后填入 config.json 的 gh_path；"
-            "或安装 GitHub CLI: winget install GitHub.cli"
+            f"如已安装 gh CLI，请确保其在 PATH 中，或在 config.json 中配置 gh_path；"
+            f"未安装可尝试安装：{install_tip}"
         )
     return result
 

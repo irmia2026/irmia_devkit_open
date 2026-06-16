@@ -124,7 +124,10 @@ def _list_posix(filter_name: str | None) -> dict:
             pid = int(parts[1])
         except ValueError:
             continue
+        # 兼容不同系统的 ps 头部或异常行，跳过 PID 转换失败的
         name = parts[10] if len(parts) > 10 else parts[0]
+        # 清理可能带有的括号、换行等
+        name = name.strip()
         if filter_name and filter_name.lower() not in name.lower():
             continue
         try:
