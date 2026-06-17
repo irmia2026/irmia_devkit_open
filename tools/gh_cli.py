@@ -12,16 +12,26 @@ import tempfile
 from .config import get_config
 from ._helpers import _run_cmd
 
+# 缓存：gh 路径和可用性
+_GH_PATH = None
+_GH_AVAILABLE = None
+
 
 def _find_gh() -> str:
     """查找 gh CLI 路径。先读配置，再自动搜索 PATH 和常见安装位置。"""
+    global _GH_PATH
+    if _GH_PATH is not None:
+        return _GH_PATH
+    
     config = get_config()
     custom = config.get("gh_path", "")
     if custom and os.path.exists(custom):
-        return custom
+        _GH_PATH = custom
+        return _GH_PATH
     path = shutil.which("gh")
     if path:
-        return path
+        _GH_PATH = path
+        return _GH_PATH
     # Windows 常见安装位置
     for guess in [
         r"C:\Program Files\GitHub CLI\gh.exe",
@@ -29,11 +39,38 @@ def _find_gh() -> str:
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\GitHub CLI\gh.exe"),
     ]:
         if os.path.exists(guess):
-            return guess
-    return "gh"
+            _GH_PATH = guess
+            return _GH_PATH
+    _GH_PATH = "gh"
+    return _GH_PATH
+
+
+def _check_gh_available() -> bool:
+    """检查 gh CLI 是否可用，缓存结果。"""
+    global _GH_AVAILABLE
+    if _GH_AVAILABLE is not None:
+        return _GH_AVAILABLE
+    
+    gh_bin = _find_gh()
+    if gh_bin == "gh":
+        # 尝试运行 gh --version 确认
+        result = _run_cmd([gh_bin, "--version"], timeout=5)
+        _GH_AVAILABLE = result["ok"]
+    else:
+        _GH_AVAILABLE = True
+    return _GH_AVAILABLE
 
 
 def _run_gh(args: list[str], cwd: str = None, timeout: int = 20) -> dict:
+    if not _check_gh_available():
+        return {
+            "ok": False,
+            "error": (
+                "gh CLI 未找到或未安装。"
+                "安装: winget install GitHub.cli"
+            ),
+        }
+    
     if not cwd:
         cwd = os.getcwd()
     gh_bin = _find_gh()

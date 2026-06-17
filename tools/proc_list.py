@@ -4,6 +4,7 @@ proc_list — 进程列表查询。
 """
 
 import os
+import time
 
 from ._helpers import proposal_reply, _run_cmd
 
@@ -13,19 +14,41 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# 缓存：进程列表（5秒TTL）
+_PROC_CACHE = None
+_PROC_CACHE_TIME = 0
+_PROC_CACHE_TTL = 5.0
+
 
 def list_processes(filter_name: str | None = None) -> dict:
     """列出所有进程。可通过 filter_name 按名称模糊过滤。"""
+    global _PROC_CACHE, _PROC_CACHE_TIME
+    
+    # 无过滤时尝试缓存
+    if not filter_name:
+        now = time.time()
+        if _PROC_CACHE is not None and (now - _PROC_CACHE_TIME) < _PROC_CACHE_TTL:
+            return _PROC_CACHE
+    
     if HAS_PSUTIL:
-        return _list_psutil(filter_name)
-    if os.name == "nt":
-        return _list_windows(filter_name)
-    return _list_posix(filter_name)
+        result = _list_psutil(filter_name)
+    elif os.name == "nt":
+        result = _list_windows(filter_name)
+    else:
+        result = _list_posix(filter_name)
+    
+    # 缓存无过滤结果
+    if not filter_name and result.get("ok"):
+        _PROC_CACHE = result
+        _PROC_CACHE_TIME = time.time()
+    
+    return result
 
 
 def _list_psutil(filter_name: str | None) -> dict:
     """psutil 后端：跨平台 + 结构化 + 性能最优"""
     processes = []
+    # 使用 process_iter 指定字段，避免获取全量信息
     for proc in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
             info = proc.info
