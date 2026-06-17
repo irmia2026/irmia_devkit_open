@@ -11,19 +11,9 @@ from pathlib import Path
 from ._helpers import proposal_reply
 
 
-def check(filepath: str) -> dict:
-    """
-    检查文件语法。
-
-    Returns:
-        {"ok": true, "language": "python"} 或 {"ok": false, "errors": [...], "language": "..."}
-    """
-    p = Path(filepath)
-    if not p.exists():
-        return {"ok": False, "error": f"文件不存在: {filepath}", "language": "unknown"}
-
-    suffix = p.suffix.lower()
-
+# 预编译的代码后缀映射——避免每次调用重新构建
+def _check_dispatch(p: Path, suffix: str) -> dict:
+    """根据文件后缀分派到对应的语法检查器。"""
     if suffix == ".py":
         return _check_python(p)
     elif suffix == ".nim":
@@ -38,6 +28,20 @@ def check(filepath: str) -> dict:
             "language": f"text/{suffix}",
             "note": "无法语法检查此类型文件，仅确认文件存在",
         }
+
+
+def check(filepath: str) -> dict:
+    """
+    检查文件语法。
+
+    Returns:
+        {"ok": true, "language": "python"} 或 {"ok": false, "errors": [...], "language": "..."}
+    """
+    p = Path(filepath)
+    if not p.exists():
+        return {"ok": False, "error": f"文件不存在: {filepath}", "language": "unknown"}
+
+    return _check_dispatch(p, p.suffix.lower())
 
 
 def _check_python(p: Path) -> dict:

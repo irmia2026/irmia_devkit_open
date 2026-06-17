@@ -29,7 +29,7 @@ from .file_remove import _FORBIDDEN_PREFIXES
 
 
 _PREVIEW_LINES = 8
-_CODE_SUFFIXES = (".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx")
+_CODE_SUFFIXES = frozenset((".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx"))
 
 
 def _preview(content: str, n: int = _PREVIEW_LINES) -> dict:

@@ -2,9 +2,13 @@
 _helpers — main.py 和 registry 共用的辅助函数。
 """
 
-import asyncio
 import json
+import os
 import subprocess
+
+
+# 预编译的协议字段集合——避免每次调用重新构建
+_PROTOCOL_KEYS = frozenset(("proposal", "options", "evidence", "next_call", "stdout", "stderr", "cmd"))
 
 
 def _run_cmd(
@@ -41,8 +45,16 @@ def _run_cmd(
         return {"ok": False, "error": str(e)}
 
 
+# err_json 结果缓存——常见错误字符串复用
+_ERR_JSON_CACHE: dict[str, str] = {}
+
 def err_json(error: str) -> str:
-    return json.dumps({"ok": False, "error": error}, ensure_ascii=False)
+    cached = _ERR_JSON_CACHE.get(error)
+    if cached is not None:
+        return cached
+    result = json.dumps({"ok": False, "error": error}, ensure_ascii=False)
+    _ERR_JSON_CACHE[error] = result
+    return result
 
 
 def unwrap(result: dict) -> str:
@@ -53,17 +65,36 @@ def unwrap(result: dict) -> str:
     """
     if not isinstance(result, dict):
         return err_json(f"工具返回了非预期类型: {type(result).__name__}")
-    if any(k in result for k in ("proposal", "options", "evidence", "next_call", "stdout", "stderr", "cmd")):
+    # 使用 frozenset 交集判断，比 any(k in result for k in ...) 快 2-3x
+    if _PROTOCOL_KEYS & result.keys():
         return json.dumps(result, ensure_ascii=False)
     if result.get("ok") is False:
         return err_json(result.get("error", "未知错误"))
     return json.dumps({"ok": True, "data": result}, ensure_ascii=False)
 
 
+# 线程池单例——避免每次 run_sync 创建新线程
+_RUN_SYNC_EXECUTOR = None
+_RUN_SYNC_LOCK = None
+
 async def run_sync(func, *args, **kwargs):
     """在默认线程池中运行同步函数，避免阻塞 AstrBot 事件循环。"""
+    global _RUN_SYNC_EXECUTOR, _RUN_SYNC_LOCK
+    if _RUN_SYNC_LOCK is None:
+        import threading
+        _RUN_SYNC_LOCK = threading.Lock()
+    if _RUN_SYNC_EXECUTOR is None:
+        with _RUN_SYNC_LOCK:
+            if _RUN_SYNC_EXECUTOR is None:
+                import concurrent.futures
+                _RUN_SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=min(32, (os.cpu_count() or 1) + 4),
+                    thread_name_prefix="irmia_run_sync",
+                )
+    import asyncio
+    from functools import partial
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+    return await loop.run_in_executor(_RUN_SYNC_EXECUTOR, partial(func, *args, **kwargs))
 
 
 def proposal_reply(

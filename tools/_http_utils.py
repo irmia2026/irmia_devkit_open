@@ -8,7 +8,8 @@ import socket
 import urllib.request
 from urllib.parse import urlparse
 
-_PRIVATE_NETS = [
+# 预编译的私有网络集合——避免每次调用重新构建
+_PRIVATE_NETS = frozenset([
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -16,7 +17,17 @@ _PRIVATE_NETS = [
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
-]
+])
+
+# opener 单例——避免每次请求重新构建
+_SAFE_OPENER = None
+
+def make_opener():
+    """创建带 SSRF 重定向校验的 URL opener（单例缓存）。"""
+    global _SAFE_OPENER
+    if _SAFE_OPENER is None:
+        _SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
+    return _SAFE_OPENER
 
 
 def validate_url(url: str) -> dict | None:
@@ -69,11 +80,6 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         if err:
             raise urllib.error.URLError(f"重定向目标被拦截: {err['error']}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-def make_opener():
-    """创建带 SSRF 重定向校验的 URL opener。"""
-    return urllib.request.build_opener(SafeRedirectHandler())
 
 
 def check_url(url: str) -> dict | None:
