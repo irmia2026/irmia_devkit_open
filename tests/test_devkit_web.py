@@ -24,8 +24,8 @@ class MockPlatform:
 
 
 class TestDevkitWebGroups:
-    def test_group_list_ignores_config_only_left_groups(self, tmp_dir):
-        cfg_path = Path(tmp_dir) / "group_configs.json"
+    def test_group_list_ignores_config_only_left_groups(self, tmp_path):
+        cfg_path = Path(tmp_path) / "group_configs.json"
         cfg_path.write_text(
             json.dumps(
                 {
@@ -44,6 +44,7 @@ class TestDevkitWebGroups:
 
         groups = asyncio.run(controller._get_all_groups())
 
-        assert [g["id"] for g in groups] == ["1001"]
-        assert groups[0]["name"] == "当前群"
-        assert groups[0]["updated_at"] == 10
+        assert [g["id"] for g in groups] == ["__default__", "1001"]
+        assert groups[0]["is_default"] is True
+        assert groups[1]["name"] == "当前群"
+        assert groups[1]["updated_at"] == 10

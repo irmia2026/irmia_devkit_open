@@ -1,67 +1,91 @@
 {
-  "owner_sid": {
-    "description": "管理员会话 ID（可不填）。插件会自动读取 AstrBot 「管理员 ID」列表，此处仅在需要额外放行时填写。",
-    "type": "string",
-    "default": ""
-  },
-  "allowed_ids": {
-    "description": "额外允许使用开发工具箱的管理员 ID（逗号分隔）。插件自动读取 AstrBot 全局管理员列表，此处仅填写额外用户。平台无关，适用于所有接入平台。",
-    "hint": "逗号分隔。",
-    "type": "string",
-    "default": ""
-  },
-  "group_config_enabled": {
-    "description": "启用群级工具箱权限配置。开启后可在 Web 管理面板为每个群独立设置管理员和工具组开关。默认关闭，不加载相关 Web 模块。（需重启生效）",
-    "type": "bool",
-    "default": false
-  },
-  "tool_groups": {
-    "description": "工具组开关（关闭整组禁用该组所有工具，需重启生效）",
+  "权限管理": {
+    "description": "高权限入口：先确定谁能使用开发工具箱，再配置是否启用群级控制。",
     "type": "object",
     "items": {
-      "安全编辑链": { "type": "bool", "default": true, "description": "🔒 安全编辑链 — 编辑/备份/语法/测试/原子多文件编辑" },
-      "Git & GitHub": { "type": "bool", "default": true, "description": "🔀 Git操作+PR/Issue/Release/CI" },
-      "文件系统": { "type": "bool", "default": true, "description": "📁 文件系统 — 搜索/浏览/哈希/压缩/磁盘/删除" },
-      "系统信息": { "type": "bool", "default": true, "description": "📊 系统信息 — 端口/进程/快照/统计" },
-      "执行与审计": { "type": "bool", "default": true, "description": "🧾 执行与审计 — 安全命令执行/工具调用日志" },
-      "网络": { "type": "bool", "default": true, "description": "🌐 网络 — HTTP GET/POST/下载" },
-      "文本处理": { "type": "bool", "default": true, "description": "📝 文本处理 — HTML/JSON/CSV/日志" },
-      "编码/时间（合并）": { "type": "bool", "default": true, "description": "🔤⏱ 编码/时间 — Base64/URL/Hex/时间戳/ISO/时间差" },
-      "扩展": { "type": "bool", "default": true, "description": "🧩 扩展 — 项目初始化/变更日志/版本/UUID/DB/依赖" },
-      "代码理解": { "type": "bool", "default": true, "description": "🤖 代码理解 — 语义索引/探索/影响分析/上下文打包/符号重命名" }
+      "owner_sid": {
+        "description": "管理员会话 ID（可不填）。插件会自动读取 AstrBot 管理员 ID 列表；这里只填写额外放行对象。",
+        "type": "string",
+        "default": ""
+      },
+      "allowed_ids": {
+        "description": "额外允许使用开发工具箱的用户 ID，多个用逗号分隔。平台无关，适用于所有接入平台。",
+        "hint": "逗号分隔。",
+        "type": "string",
+        "default": ""
+      },
+      "group_config_enabled": {
+        "description": "启用前端分群配置。开启后可设置默认群配置、群管理员、工具组和单工具开关。（需重启生效）",
+        "type": "bool",
+        "default": false
+      }
     }
   },
-  "disabled_tools": {
-    "description": "单独禁用的工具名（逗号分隔，如 git_push,http_download）",
-    "type": "string",
-    "default": ""
-  },
-  "paths": {
-    "description": "外部工具路径（留空 = 自动检测）",
+  "工具权限": {
+    "description": "工具组和单工具总开关。先按工具组控制，再用单工具禁用做精细限制。",
     "type": "object",
     "items": {
-      "es_path": {
-        "description": "Everything CLI (es.exe) 路径",
+      "tool_groups": {
+        "description": "工具组总开关（关闭整组会禁用该组所有工具，需重启生效）",
+        "type": "object",
+        "items": {
+          "安全编辑链": { "type": "bool", "default": true, "description": "安全编辑链 — 编辑、备份、语法、测试、原子多文件编辑" },
+          "Git & GitHub": { "type": "bool", "default": true, "description": "Git 操作、PR、Issue、Release、CI" },
+          "文件系统": { "type": "bool", "default": true, "description": "搜索、浏览、哈希、压缩、磁盘、删除" },
+          "执行与审计": { "type": "bool", "default": true, "description": "安全命令执行、工具调用日志" },
+          "系统信息": { "type": "bool", "default": true, "description": "端口、进程、系统快照、统计" },
+          "网络": { "type": "bool", "default": true, "description": "HTTP GET/POST、下载" },
+          "代码理解": { "type": "bool", "default": true, "description": "语义索引、探索、影响分析、上下文打包、符号重命名" },
+          "文本处理": { "type": "bool", "default": true, "description": "HTML、JSON、CSV、日志、Markdown" },
+          "编码/时间（合并）": { "type": "bool", "default": true, "description": "Base64、URL、Hex、时间戳、ISO、时间差" },
+          "扩展": { "type": "bool", "default": true, "description": "项目初始化、变更日志、版本、UUID、DB、依赖" }
+        }
+      },
+      "disabled_tools": {
+        "description": "单独禁用的工具名，多个用逗号分隔。例如：git_push,http_download。",
         "type": "string",
         "default": ""
-      },
-      "gh_path": {
-        "description": "GitHub CLI (gh.exe) 路径",
-        "type": "string",
-        "default": ""
-      },
+      }
+    }
+  },
+  "外部路径": {
+    "description": "外部工具和存储路径。通常保持空值，让插件自动检测。",
+    "type": "object",
+    "items": {
+      "paths": {
+        "description": "外部工具路径（留空 = 自动检测）",
+        "type": "object",
+        "items": {
+          "es_path": {
+            "description": "Everything CLI（es.exe）路径",
+            "type": "string",
+            "default": ""
+          },
+          "gh_path": {
+            "description": "GitHub CLI（gh.exe）路径",
+            "type": "string",
+            "default": ""
+          },
+          "backup_dir": {
+            "description": "safe_edit 备份目录",
+            "type": "string",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "兼容保留": {
+    "description": "历史字段，仅为兼容旧配置保留。新安装通常不需要修改。",
+    "type": "object",
+    "items": {
       "state_dir": {
-        "description": "（已弃用）异步任务状态文件目录，保留仅为向后兼容",
+        "description": "（已弃用）异步任务状态文件目录，保留仅为向后兼容。",
         "type": "string",
         "default": ""
       },
       "lock_dirs": {
-        "description": "（已弃用）文件锁检测目录，保留仅为向后兼容",
-        "type": "string",
-        "default": ""
-      },
-      "backup_dir": {
-        "description": "safe_edit 备份目录",
+        "description": "（已弃用）文件锁检测目录，保留仅为向后兼容。",
         "type": "string",
         "default": ""
       }

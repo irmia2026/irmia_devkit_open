@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>弥亚开发工具箱</title>
-<link rel="stylesheet" href="./styles.css?v=20260604_review1">
+<link rel="stylesheet" href="./styles.css?v=20260618_groups_layout">
 </head>
 <body>
 
 <div class="sidebar">
   <div class="sidebar-header">
-    <h2>🛠️ 群聊配置</h2>
-    <p>为每个群单独配置工具权限</p>
+    <h2>群聊权限配置</h2>
+    <p>默认配置置顶，群配置可单独覆盖</p>
   </div>
   <div class="group-list" id="groupList">
     <!-- JS 动态填充 -->
@@ -20,13 +20,13 @@
 
 <div class="main-content" id="mainContent">
   <div class="top-actions">
-    <button class="theme-toggle" id="paletteToggleBtn" type="button" title="切换主题色：金奢 / 蓝白">
-      <span>🎨 主题色</span><b id="paletteModeLabel">金奢</b>
+    <button class="theme-toggle" id="paletteToggleBtn" type="button" title="切换主题色：金奢 / 蓝白 / 炫彩">
+      <span>主题</span><b id="paletteModeLabel">金奢</b>
     </button>
   </div>
   <div class="empty-state" id="emptyState">
-    <div class="icon">🛠️</div>
-    <p>请从左侧选择一个群聊开始配置</p>
+    <div class="icon">⚙️</div>
+    <p>请选择默认配置或某个群聊</p>
   </div>
   <div class="config-panel" id="configPanel" style="display:none">
     <!-- JS 动态填充 -->
@@ -46,6 +46,6 @@
   </div>
 </div>
 
-<script type="module" src="./app.js?v=20260618_palette"></script>
+<script type="module" src="./app.js?v=20260618_groups_layout"></script>
 </body>
 </html>

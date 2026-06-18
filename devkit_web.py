@@ -21,6 +21,8 @@ except ImportError:
     quart_request_obj = None
 
 PLUGIN_NAME = "astrbot_plugin_irmia_devkit"
+DEFAULT_GROUP_ID = "__default__"
+VALID_PALETTES = {"luxury", "bluewhite", "vivid"}
 
 
 class DevkitWebController:
@@ -37,7 +39,7 @@ class DevkitWebController:
         routes = [
             ("/ping", self.page_ping, ["GET"], "Devkit ping"),
             ("/tool_groups", self.page_tool_groups, ["GET"], "Tool group definitions"),
-            ("/groups", self.page_list_groups, ["GET"], "QQ group list"),
+            ("/groups", self.page_list_groups, ["GET"], "Group list"),
             ("/group_config", self.page_get_group_config, ["GET"], "Get one group config"),
             ("/group_config/save", self.page_save_group_config, ["POST"], "Save one group config"),
             ("/global_admin_ids", self.page_global_admin_ids, ["GET"], "Global admin IDs"),
@@ -87,7 +89,7 @@ class DevkitWebController:
 
     @staticmethod
     def _valid_group_id(group_id: str) -> bool:
-        return bool(group_id) and len(group_id) <= 64
+        return group_id == DEFAULT_GROUP_ID or (bool(group_id) and len(group_id) <= 64)
 
     # ── API ──
 
@@ -96,7 +98,7 @@ class DevkitWebController:
 
     async def page_tool_groups(self):
         from .tools._registry import TOOL_GROUPS
-        return self._jsonify({"ok": True, "groups": {k: v for k, v in TOOL_GROUPS.items()}})
+        return self._jsonify({"ok": True, "groups": {k: list(v) for k, v in TOOL_GROUPS.items()}})
 
     async def page_list_groups(self):
         groups = await self._get_all_groups()
@@ -107,7 +109,7 @@ class DevkitWebController:
         if not self._valid_group_id(group_id):
             return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
         configs = self._read_group_configs()
-        cfg = configs.get(group_id, self._default_group_config(group_id))
+        cfg = self._effective_group_config(configs, group_id)
         return self._jsonify({"ok": True, "config": cfg})
 
     async def page_save_group_config(self):
@@ -115,15 +117,7 @@ class DevkitWebController:
         group_id = self._normalize_group_id(data.get("group_id", ""))
         if not self._valid_group_id(group_id):
             return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
-        raw_tool_groups = data.get("tool_groups", {})
-        if not isinstance(raw_tool_groups, dict):
-            raw_tool_groups = {}
-        clean = {
-            "group_id": group_id,
-            "extra_admin_ids": str(data.get("extra_admin_ids", "")).strip(),
-            "tool_groups": {str(k): bool(v) for k, v in raw_tool_groups.items()},
-            "updated_at": int(time.time()),
-        }
+        clean = self._clean_group_config(data, group_id)
         configs = self._read_group_configs()
         configs[group_id] = clean
         self._write_group_configs(configs)
@@ -131,7 +125,7 @@ class DevkitWebController:
             self.plugin._group_configs_cache = configs
         else:
             logger.warning("plugin 缺少 _group_configs_cache 属性，缓存未更新")
-        return self._jsonify({"ok": True})
+        return self._jsonify({"ok": True, "config": clean})
 
     async def page_global_admin_ids(self):
         try:
@@ -148,7 +142,7 @@ class DevkitWebController:
     async def page_save_ui_preferences(self):
         data = await self._request().get_json(force=True, silent=True) or {}
         palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
-        if palette_mode not in {"luxury", "bluewhite"}:
+        if palette_mode not in VALID_PALETTES:
             palette_mode = "luxury"
         prefs = self._read_ui_preferences()
         prefs["palette_mode"] = palette_mode
@@ -158,8 +152,8 @@ class DevkitWebController:
 
     # ── 群列表 ──
 
-    async def _get_all_groups(self) -> list[dict[str, str]]:
-        groups: dict[str, dict[str, str]] = {}
+    async def _get_all_groups(self) -> list[dict[str, Any]]:
+        groups: dict[str, dict[str, Any]] = {}
         try:
             platform_insts = self.context.platform_manager.platform_insts
         except Exception:
@@ -182,7 +176,7 @@ class DevkitWebController:
                         continue
                     name = str(item.get("group_name") or item.get("name") or f"群{gid}")
                     avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("group_avatar") or "")
-                    groups[gid] = {"id": gid, "name": name, "avatar": avatar}
+                    groups[gid] = {"id": gid, "name": name, "avatar": avatar, "is_default": False}
             except AttributeError as exc:
                 logger.debug("devkit: 当前平台不支持 get_group_list: %s", exc)
             except Exception as exc:
@@ -193,14 +187,82 @@ class DevkitWebController:
                 continue
             updated_at = int(cfg.get("updated_at", 0)) if isinstance(cfg, dict) else 0
             groups[gid]["updated_at"] = updated_at
-        return sorted(groups.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("id") or "")))
+        ordered = sorted(
+            groups.values(),
+            key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("id") or "")),
+        )
+        return [{"id": DEFAULT_GROUP_ID, "name": "默认群配置", "avatar": "", "is_default": True, "updated_at": 0}, *ordered]
 
     # ── 群配置 ──
 
     @staticmethod
     def _default_group_config(group_id: str) -> dict[str, Any]:
         from .tools._registry import TOOL_GROUPS
-        return {"group_id": group_id, "extra_admin_ids": "", "tool_groups": {g: True for g in TOOL_GROUPS}}
+        return {
+            "group_id": group_id,
+            "extra_admin_ids": "",
+            "tool_groups": {g: True for g in TOOL_GROUPS},
+            "disabled_tools": [],
+            "updated_at": 0,
+        }
+
+    def _normalized_config(self, cfg: Any, group_id: str) -> dict[str, Any]:
+        clean = self._default_group_config(group_id)
+        if not isinstance(cfg, dict):
+            return clean
+        clean["extra_admin_ids"] = str(cfg.get("extra_admin_ids", "")).strip()
+        raw_tool_groups = cfg.get("tool_groups", {})
+        if isinstance(raw_tool_groups, dict):
+            clean["tool_groups"].update({str(k): bool(v) for k, v in raw_tool_groups.items()})
+        clean["disabled_tools"] = self._normalize_disabled_tools(cfg.get("disabled_tools", []))
+        clean["updated_at"] = int(cfg.get("updated_at", 0) or 0)
+        return clean
+
+    def _effective_group_config(self, configs: dict[str, Any], group_id: str) -> dict[str, Any]:
+        if group_id == DEFAULT_GROUP_ID:
+            return self._normalized_config(configs.get(group_id), group_id)
+        base = self._normalized_config(configs.get(DEFAULT_GROUP_ID), group_id)
+        group_cfg = self._normalized_config(configs.get(group_id), group_id)
+        if group_id not in configs:
+            return base
+        base["extra_admin_ids"] = group_cfg.get("extra_admin_ids", base["extra_admin_ids"])
+        base["tool_groups"].update(group_cfg.get("tool_groups", {}))
+        base["disabled_tools"] = group_cfg.get("disabled_tools", base["disabled_tools"])
+        base["updated_at"] = group_cfg.get("updated_at", 0)
+        return base
+
+    def _clean_group_config(self, data: dict[str, Any], group_id: str) -> dict[str, Any]:
+        raw_tool_groups = data.get("tool_groups", {})
+        if not isinstance(raw_tool_groups, dict):
+            raw_tool_groups = {}
+        clean = self._normalized_config(
+            {
+                "extra_admin_ids": data.get("extra_admin_ids", ""),
+                "tool_groups": raw_tool_groups,
+                "disabled_tools": data.get("disabled_tools", []),
+                "updated_at": int(time.time()),
+            },
+            group_id,
+        )
+        clean["updated_at"] = int(time.time())
+        return clean
+
+    @staticmethod
+    def _normalize_disabled_tools(raw: Any) -> list[str]:
+        if isinstance(raw, str):
+            items = raw.replace("，", ",").split(",")
+        elif isinstance(raw, list):
+            items = raw
+        else:
+            items = []
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in items:
+            name = str(item).strip()
+            if name and name not in seen:
+                seen.add(name)
+                result.append(name)
+        return result
 
     def _read_group_configs(self) -> dict[str, Any]:
         config_file = self._group_config_file()
@@ -236,7 +298,7 @@ class DevkitWebController:
             if not isinstance(data, dict):
                 return {"palette_mode": "luxury"}
             palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
-            data["palette_mode"] = palette_mode if palette_mode in {"luxury", "bluewhite"} else "luxury"
+            data["palette_mode"] = palette_mode if palette_mode in VALID_PALETTES else "luxury"
             return data
         except Exception:
             logger.warning("ui_preferences.json 读取失败，已使用默认偏好")
