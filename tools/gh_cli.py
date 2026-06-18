@@ -139,6 +139,29 @@ def pr_merge(cwd: str, number: int = None, strategy: str = "squash") -> dict:
     return _run_gh(args, cwd=cwd, timeout=30)
 
 
+def pr_review(
+    cwd: str,
+    number: int,
+    body: str = "",
+    review_event: str = "comment",
+) -> dict:
+    """提交 PR review。body 始终通过 --body-file 传递，避免 shell/CLI 截断多行正文。"""
+    event_flags = {
+        "approve": "--approve",
+        "request-changes": "--request-changes",
+        "comment": "--comment",
+    }
+    flag = event_flags.get(str(review_event or "comment").strip().lower())
+    if not flag:
+        return {"ok": False, "error": "review_event 必须是 approve/request-changes/comment"}
+    args = ["pr", "review", str(number), flag]
+    tmp = _with_body_file(body, args)
+    try:
+        return _run_gh(args, cwd=cwd, timeout=30)
+    finally:
+        _cleanup(tmp)
+
+
 def issue_create(
     cwd: str, title: str, body: str = "", labels: list[str] = None
 ) -> dict:

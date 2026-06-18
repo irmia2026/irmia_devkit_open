@@ -80,36 +80,49 @@ class Main(star.Star):
 
         # AstrBot WebUI 配置优先于 config.json
         if config:
+            sectioned = {}
+            for section_name in ("权限管理", "工具权限", "外部路径", "兼容保留"):
+                value = config.get(section_name, {})
+                if isinstance(value, dict):
+                    sectioned.update(value)
+            web_config = {**config, **sectioned}
             changed = False
-            web_owner = config.get("owner_sid", "")
+            web_owner = web_config.get("owner_sid", "")
             if web_owner:
                 _config["owner_sid"] = web_owner
                 changed = True
-            web_allowed = config.get("allowed_ids", "")
+            web_allowed = web_config.get("allowed_ids", "")
             if web_allowed:
                 _config["allowed_ids"] = web_allowed
                 changed = True
-            web_group_enabled = config.get("group_config_enabled", None)
+            web_group_enabled = web_config.get("group_config_enabled", None)
             if isinstance(web_group_enabled, bool):
                 _config["group_config_enabled"] = web_group_enabled
                 changed = True
-            paths = config.get("paths", {})
+            paths = web_config.get("paths", {})
+            if not isinstance(paths, dict):
+                paths = {}
             for key in ("es_path", "gh_path", "backup_dir"):
-                if paths.get(key):
-                    _config[key] = paths[key]
+                value = paths.get(key) or web_config.get(key, "")
+                if value:
+                    _config[key] = value
                     changed = True
-            if paths.get("lock_dirs"):
-                _config["lock_dirs"] = [d.strip() for d in paths["lock_dirs"].split(",") if d.strip()]
+            lock_dirs_value = paths.get("lock_dirs") or web_config.get("lock_dirs", "")
+            if lock_dirs_value:
+                _config["lock_dirs"] = [d.strip() for d in str(lock_dirs_value).split(",") if d.strip()]
                 changed = True
-            web_groups = config.get("tool_groups", {})
+            web_groups = web_config.get("tool_groups", {})
             if web_groups and isinstance(web_groups, dict):
                 stored = _config.setdefault("tool_groups", {})
                 for g, v in web_groups.items():
                     stored[g] = v
                 changed = True
-            web_disabled = config.get("disabled_tools", "")
+            web_disabled = web_config.get("disabled_tools", "")
             if web_disabled:
-                _config["disabled_tools"] = [t.strip() for t in web_disabled.split(",") if t.strip()]
+                if isinstance(web_disabled, str):
+                    _config["disabled_tools"] = [t.strip() for t in web_disabled.replace("，", ",").split(",") if t.strip()]
+                elif isinstance(web_disabled, list):
+                    _config["disabled_tools"] = [str(t).strip() for t in web_disabled if str(t).strip()]
                 changed = True
             if changed:
                 try:
@@ -213,10 +226,38 @@ class Main(star.Star):
     def _group_config_for_event(self, event: AstrMessageEvent) -> dict:
         if not self._group_config_enabled:
             return {}
+        configs = self._group_configs_cache if isinstance(self._group_configs_cache, dict) else {}
         group_id = self._event_group_id(event)
-        if not group_id:
+        default_cfg = configs.get("__default__", {})
+        group_cfg = configs.get(group_id, {}) if group_id else {}
+        if not isinstance(default_cfg, dict):
+            default_cfg = {}
+        if not isinstance(group_cfg, dict):
+            group_cfg = {}
+        if not default_cfg and not group_cfg:
             return {}
-        return self._group_configs_cache.get(group_id, {}) if isinstance(self._group_configs_cache, dict) else {}
+        default_disabled = default_cfg.get("disabled_tools", [])
+        if isinstance(default_disabled, str):
+            default_disabled = [x.strip() for x in default_disabled.replace("，", ",").split(",") if x.strip()]
+        elif not isinstance(default_disabled, list):
+            default_disabled = []
+        merged = {
+            "extra_admin_ids": default_cfg.get("extra_admin_ids", ""),
+            "tool_groups": dict(default_cfg.get("tool_groups", {}) if isinstance(default_cfg.get("tool_groups", {}), dict) else {}),
+            "disabled_tools": [str(x).strip() for x in default_disabled if str(x).strip()],
+        }
+        if group_cfg:
+            # 群配置覆盖默认值，非叠加。
+            merged["extra_admin_ids"] = group_cfg.get("extra_admin_ids", merged["extra_admin_ids"])
+            raw_groups = group_cfg.get("tool_groups", {})
+            if isinstance(raw_groups, dict):
+                merged["tool_groups"].update(raw_groups)
+            raw_disabled = group_cfg.get("disabled_tools", [])
+            if isinstance(raw_disabled, str):
+                raw_disabled = [x.strip() for x in raw_disabled.replace("，", ",").split(",") if x.strip()]
+            if isinstance(raw_disabled, list):
+                merged["disabled_tools"] = [str(x).strip() for x in raw_disabled if str(x).strip()]
+        return merged
 
     def _is_group_extra_admin(self, event: AstrMessageEvent) -> bool:
         sender_id = str(event.get_sender_id() or "").strip()
@@ -227,6 +268,11 @@ class Main(star.Star):
         cfg = self._group_config_for_event(event)
         if not cfg:
             return True
+        disabled_tools = cfg.get("disabled_tools", [])
+        if isinstance(disabled_tools, str):
+            disabled_tools = [x.strip() for x in disabled_tools.replace("，", ",").split(",") if x.strip()]
+        if tool_name in {str(x).strip() for x in disabled_tools if str(x).strip()}:
+            return False
         group_switches = cfg.get("tool_groups", {})
         if not isinstance(group_switches, dict):
             return True

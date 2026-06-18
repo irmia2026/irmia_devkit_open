@@ -118,10 +118,14 @@ class DevkitWebController:
         raw_tool_groups = data.get("tool_groups", {})
         if not isinstance(raw_tool_groups, dict):
             raw_tool_groups = {}
+        raw_disabled_tools = data.get("disabled_tools", [])
+        if not isinstance(raw_disabled_tools, list):
+            raw_disabled_tools = []
         clean = {
             "group_id": group_id,
             "extra_admin_ids": str(data.get("extra_admin_ids", "")).strip(),
             "tool_groups": {str(k): bool(v) for k, v in raw_tool_groups.items()},
+            "disabled_tools": [str(item).strip() for item in raw_disabled_tools if str(item).strip()],
             "updated_at": int(time.time()),
         }
         configs = self._read_group_configs()
@@ -148,10 +152,14 @@ class DevkitWebController:
     async def page_save_ui_preferences(self):
         data = await self._request().get_json(force=True, silent=True) or {}
         palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
-        if palette_mode not in {"luxury", "bluewhite"}:
+        if palette_mode not in {"luxury", "bluewhite", "vivid", "void"}:
             palette_mode = "luxury"
+        appearance_mode = str(data.get("appearance_mode", "auto")).strip().lower()
+        if appearance_mode not in {"auto", "light", "dark"}:
+            appearance_mode = "auto"
         prefs = self._read_ui_preferences()
         prefs["palette_mode"] = palette_mode
+        prefs["appearance_mode"] = appearance_mode
         prefs["updated_at"] = int(time.time())
         self._write_ui_preferences(prefs)
         return self._jsonify({"ok": True, "preferences": prefs})
@@ -200,7 +208,12 @@ class DevkitWebController:
     @staticmethod
     def _default_group_config(group_id: str) -> dict[str, Any]:
         from .tools._registry import TOOL_GROUPS
-        return {"group_id": group_id, "extra_admin_ids": "", "tool_groups": {g: True for g in TOOL_GROUPS}}
+        return {
+            "group_id": group_id,
+            "extra_admin_ids": "",
+            "tool_groups": {g: True for g in TOOL_GROUPS},
+            "disabled_tools": [],
+        }
 
     def _read_group_configs(self) -> dict[str, Any]:
         config_file = self._group_config_file()
@@ -236,7 +249,9 @@ class DevkitWebController:
             if not isinstance(data, dict):
                 return {"palette_mode": "luxury"}
             palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
-            data["palette_mode"] = palette_mode if palette_mode in {"luxury", "bluewhite"} else "luxury"
+            data["palette_mode"] = palette_mode if palette_mode in {"luxury", "bluewhite", "vivid", "void"} else "luxury"
+            appearance_mode = str(data.get("appearance_mode", "auto")).strip().lower()
+            data["appearance_mode"] = appearance_mode if appearance_mode in {"auto", "light", "dark"} else "auto"
             return data
         except Exception:
             logger.warning("ui_preferences.json 读取失败，已使用默认偏好")
