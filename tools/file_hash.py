@@ -12,6 +12,9 @@ ALGOS = {
     "sha256": hashlib.sha256,
 }
 
+# 分块大小：8MB，平衡内存占用和I/O次数
+_HASH_CHUNK_SIZE = 8 * 1024 * 1024
+
 
 def compute(filepath: str, algo: str = "sha256") -> dict:
     """计算文件哈希值。算法: md5/sha1/sha256（默认）。"""
@@ -28,7 +31,7 @@ def compute(filepath: str, algo: str = "sha256") -> dict:
     try:
         h = ALGOS[algo]()
         with open(filepath, "rb") as f:
-            while chunk := f.read(8192):
+            while chunk := f.read(_HASH_CHUNK_SIZE):
                 h.update(chunk)
         return {
             "ok": True,

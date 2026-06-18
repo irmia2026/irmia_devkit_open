@@ -154,6 +154,14 @@ def _python_fallback(
                 ext = os.path.splitext(fname)[1].lstrip(".")
                 if ext not in file_exts:
                     continue
+            # 快速跳过：大文件不搜索内容
+            try:
+                st = os.stat(fpath)
+                if st.st_size > 1_000_000:  # 跳过 >1MB 文件
+                    files_searched += 1
+                    continue
+            except OSError:
+                continue
 
             files_searched += 1
             fpath = os.path.join(root, fname)
