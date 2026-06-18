@@ -247,6 +247,7 @@ class Main(star.Star):
             "disabled_tools": [str(x).strip() for x in default_disabled if str(x).strip()],
         }
         if group_cfg:
+            # 群配置覆盖默认值，非叠加。
             merged["extra_admin_ids"] = group_cfg.get("extra_admin_ids", merged["extra_admin_ids"])
             raw_groups = group_cfg.get("tool_groups", {})
             if isinstance(raw_groups, dict):
