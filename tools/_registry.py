@@ -1135,10 +1135,10 @@ FileReadTool = make_tool(
                     "description": "hex 模式下最多读取的字节数",
                     "default": 0,
                 },
-                "recursive": {
-                    "type": "boolean",
-                    "description": "目录读取时是否递归",
-                    "default": False,
+                "max_depth": {
+                    "type": "integer",
+                    "description": "目录读取时最大递归深度",
+                    "default": 3,
                 },
                 "max_entries": {
                     "type": "integer",

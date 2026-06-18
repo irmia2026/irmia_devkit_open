@@ -22,12 +22,19 @@ from __future__ import annotations
 
 import binascii
 import mimetypes
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ._file_utils import detect_encoding, human_size, is_binary_file, SymlinkGuard
+from ._file_utils import (
+    detect_encoding,
+    human_size,
+    is_binary_file,
+    SymlinkGuard,
+    check_path_allowed,
+)
 
 
 # ── 配置阈值 ──
@@ -42,28 +49,32 @@ MAX_DIR_ENTRIES = 50                     # 目录读取最大条目数
 
 # ── Hex Preview ──
 
-def _hex_preview(path: str | Path, max_bytes: int = MAX_HEX_BYTES) -> str:
-    """生成 hex dump（类似 xxd）。"""
+def _hex_preview(path: str | Path, max_bytes: int = MAX_HEX_BYTES, offset: int = 0) -> str:
+    """生成 hex dump（类似 xxd），支持字节偏移。"""
     p = Path(path)
     file_size = p.stat().st_size
-    read_size = min(max_bytes, file_size)
-    
+    start = min(offset, file_size)
+    read_size = min(max_bytes, file_size - start)
+
     with p.open('rb') as f:
+        f.seek(start)
         data = f.read(read_size)
-    
+
     lines = []
     for i in range(0, len(data), 16):
         chunk = data[i:i+16]
+        addr = start + i
         hex_part = ' '.join(f'{b:02x}' for b in chunk)
         hex_part = hex_part.ljust(48)
         ascii_part = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
-        lines.append(f'{i:08x}: {hex_part}  {ascii_part}')
+        lines.append(f'{addr:08x}: {hex_part}  {ascii_part}')
         if len(lines) >= MAX_HEX_LINES:
             break
-    
+
     result = '\n'.join(lines)
-    if file_size > read_size:
-        result += f'\n... ({file_size - read_size} more bytes)'
+    remaining = file_size - start - len(data)
+    if remaining > 0:
+        result += f'\n... ({remaining} more bytes)'
     return result
 
 
@@ -380,56 +391,66 @@ def _read_directory(
     recursive: bool = False,
     max_entries: int = MAX_DIR_ENTRIES,
     include_hidden: bool = False,
+    max_depth: int = 3,
+    current_depth: int = 0,
+    guard: SymlinkGuard | None = None,
 ) -> tuple[list[dict], int, bool]:
     """读取目录内容。"""
     p = Path(path)
     entries = []
     total_entries = 0
-    guard = SymlinkGuard()
-    
+    if guard is None:
+        guard = SymlinkGuard()
+
     try:
         items = list(p.iterdir())
     except PermissionError:
         raise PermissionError(f'Permission denied: {path}')
     except OSError as e:
         raise OSError(f'Cannot read directory: {path}: {e}')
-    
+
     if not include_hidden:
         items = [item for item in items if not item.name.startswith('.')]
-    
+
     total_entries = len(items)
     items.sort(key=lambda x: (0 if x.is_dir() else 1, x.name.lower()))
-    
+
     for item in items[:max_entries]:
         # symlink 循环检测
         if guard.is_seen(str(item)):
             continue
-        
+
         entry = {
             'name': item.name,
             'path': str(item),
             'type': 'directory' if item.is_dir() else 'file',
         }
-        
+
         if item.is_file():
             stat = item.stat()
             entry['size'] = stat.st_size
             entry['human_size'] = human_size(stat.st_size)
             entry['mtime'] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-        
-        if item.is_dir() and recursive:
+
+        if item.is_dir() and recursive and current_depth < max_depth:
             try:
                 children, child_total, _ = _read_directory(
-                    item, recursive=False, max_entries=10, include_hidden=include_hidden
+                    item,
+                    recursive=False,
+                    max_entries=10,
+                    include_hidden=include_hidden,
+                    max_depth=max_depth,
+                    current_depth=current_depth + 1,
+                    guard=guard,
                 )
                 entry['children'] = children
                 entry['child_count'] = child_total
             except (PermissionError, OSError):
                 entry['children'] = []
                 entry['child_count'] = 0
-        
+
         entries.append(entry)
-    
+
     has_more = len(items) > max_entries
     return entries, total_entries, has_more
 
@@ -448,6 +469,7 @@ def read(
     mode: str = 'auto',
     head: int = 0,
     tail: int = 0,
+    max_depth: int = 3,
     include_metadata: bool = True,
     recursive: bool = False,
     max_entries: int = MAX_DIR_ENTRIES,
@@ -473,6 +495,28 @@ def read(
     """
     p = Path(path).expanduser().resolve()
     
+    # 0. 路径安全校验（与 safe_write/file_remove 同级）
+    forbidden = check_path_allowed(path)
+    if forbidden:
+        return forbidden
+
+    # 1. symlink 控制：不自动跟随 symlink 跳出工作目录/进入系统目录
+    try:
+        if p.is_symlink():
+            target = os.readlink(p)
+            resolved_target = Path(target)
+            if not resolved_target.is_absolute():
+                resolved_target = (p.parent / resolved_target).resolve()
+            forbidden_target = check_path_allowed(resolved_target)
+            if forbidden_target:
+                return {
+                    'ok': False,
+                    'error': f'Symlink 指向受保护路径: {resolved_target}',
+                    'path': str(p),
+                }
+    except OSError:
+        pass
+
     if not p.exists():
         return {
             'ok': False,
@@ -485,7 +529,11 @@ def read(
         if mode == 'auto' or mode == 'directory':
             try:
                 entries, total_entries, has_more = _read_directory(
-                    p, recursive=recursive, max_entries=max_entries, include_hidden=include_hidden
+                    p,
+                    recursive=recursive,
+                    max_entries=max_entries,
+                    include_hidden=include_hidden,
+                    max_depth=max_depth,
                 )
                 
                 result = {
@@ -553,7 +601,7 @@ def read(
             'mime_type': mime_type,
             'is_binary': True,
             'binary_reason': binary_reason,
-            'hex_preview': _hex_preview(p, MAX_HEX_BYTES),
+            'hex_preview': _hex_preview(p, MAX_HEX_BYTES, offset=offset),
             'metadata': metadata,
             'content': '',
             'truncated': False,
@@ -562,7 +610,7 @@ def read(
     
     if actual_mode == 'hex':
         max_bytes = limit_bytes if limit_bytes > 0 else MAX_HEX_BYTES
-        hex_content = _hex_preview(p, max_bytes)
+        hex_content = _hex_preview(p, max_bytes, offset=offset)
         
         return {
             'ok': True,

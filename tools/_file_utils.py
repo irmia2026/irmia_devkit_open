@@ -132,6 +132,36 @@ def is_binary_file(path: str | Path, sample_size: int = 8192) -> tuple[bool, str
     return False, 'unknown'
 
 
+def _check_path_safety(path: str | Path, *, read: bool = True) -> dict | None:
+    """统一路径沙箱校验：拒绝 .. 穿越和系统目录访问。
+
+    复用 file_remove 的 _FORBIDDEN_PREFIXES。
+    返回 None 表示安全；否则返回错误 dict。
+    """
+    raw = str(path).replace("\\", "/")
+    if ".." in raw.split("/"):
+        return {"ok": False, "error": "路径包含 .. 穿越，已被拒绝"}
+
+    p = Path(path).resolve()
+    path_str = str(p).replace("\\", "/")
+    from .file_remove import _FORBIDDEN_PREFIXES
+
+    for forbidden in _FORBIDDEN_PREFIXES:
+        if path_str.lower().startswith(forbidden.lower() + "/") or path_str.lower() == forbidden.lower():
+            return {
+                "ok": False,
+                "error": f"禁止访问系统目录: {p}",
+                "proposal": "路径位于受保护的系统目录中，读取操作已被拦截。",
+                "evidence": {"path": str(p), "blocked_by": forbidden},
+            }
+    return None
+
+
+def check_path_allowed(path: str | Path) -> dict | None:
+    """safe_read 专用入口：检查路径是否允许访问。"""
+    return _check_path_safety(path, read=True)
+
+
 def read_file(path: str | Path, *, encoding: str = "auto") -> str:
     """读取文件内容。编码 auto 时自动检测，否则使用指定编码。"""
     p = Path(path)
