@@ -41,6 +41,8 @@ class DevkitWebController:
             ("/group_config", self.page_get_group_config, ["GET"], "Get one group config"),
             ("/group_config/save", self.page_save_group_config, ["POST"], "Save one group config"),
             ("/global_admin_ids", self.page_global_admin_ids, ["GET"], "Global admin IDs"),
+            ("/ui_preferences", self.page_ui_preferences, ["GET"], "UI preferences"),
+            ("/ui_preferences/save", self.page_save_ui_preferences, ["POST"], "Save UI preferences"),
         ]
         for path, handler, methods, desc in routes:
             self.context.register_web_api(
@@ -70,6 +72,12 @@ class DevkitWebController:
 
     def _group_config_file(self) -> str:
         return str(getattr(self.plugin, "_group_configs_path", ""))
+
+    def _ui_preferences_file(self) -> str:
+        group_config_file = self._group_config_file()
+        if group_config_file:
+            return os.path.join(os.path.dirname(group_config_file), "ui_preferences.json")
+        return ""
 
     @staticmethod
     def _normalize_group_id(value: Any) -> str:
@@ -132,6 +140,21 @@ class DevkitWebController:
         except Exception:
             admins = []
         return self._jsonify({"ok": True, "admin_ids": admins})
+
+    async def page_ui_preferences(self):
+        prefs = self._read_ui_preferences()
+        return self._jsonify({"ok": True, "preferences": prefs})
+
+    async def page_save_ui_preferences(self):
+        data = await self._request().get_json(force=True, silent=True) or {}
+        palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
+        if palette_mode not in {"luxury", "bluewhite"}:
+            palette_mode = "luxury"
+        prefs = self._read_ui_preferences()
+        prefs["palette_mode"] = palette_mode
+        prefs["updated_at"] = int(time.time())
+        self._write_ui_preferences(prefs)
+        return self._jsonify({"ok": True, "preferences": prefs})
 
     # ── 群列表 ──
 
@@ -202,3 +225,29 @@ class DevkitWebController:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(configs, f, ensure_ascii=False, indent=2)
         os.replace(tmp, config_file)
+
+    def _read_ui_preferences(self) -> dict[str, Any]:
+        prefs_file = self._ui_preferences_file()
+        if not prefs_file or not os.path.exists(prefs_file):
+            return {"palette_mode": "luxury"}
+        try:
+            with open(prefs_file, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return {"palette_mode": "luxury"}
+            palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
+            data["palette_mode"] = palette_mode if palette_mode in {"luxury", "bluewhite"} else "luxury"
+            return data
+        except Exception:
+            logger.warning("ui_preferences.json 读取失败，已使用默认偏好")
+            return {"palette_mode": "luxury"}
+
+    def _write_ui_preferences(self, prefs: dict[str, Any]) -> None:
+        prefs_file = self._ui_preferences_file()
+        if not prefs_file:
+            raise RuntimeError("ui preferences path is unavailable")
+        os.makedirs(os.path.dirname(prefs_file), exist_ok=True)
+        tmp = f"{prefs_file}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(prefs, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, prefs_file)
