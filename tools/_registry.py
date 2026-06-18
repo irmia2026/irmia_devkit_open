@@ -100,6 +100,7 @@ from .tool_stats import snapshot as _tool_stats_snap
 from .db_query import query as _db_query
 from .dep_scan import scan as _dep_scan
 from .file_remove import remove as _file_remove
+from .file_read import read as _file_read
 
 # ── codegraph ──
 from .codegraph import CodeGraph as _CodeGraph
@@ -1079,6 +1080,73 @@ MdStripTool = make_tool(
 )
 
 
+FileReadTool = make_tool(
+    "file_read",
+    "【增强版文件读取——替代 AstrBot 原生 file_read】读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、目录列表、搜索过滤。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常、支持目录读取和 regex 过滤。",
+    {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件或目录路径",
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "起始行号（1-based，0 表示从头）",
+                    "default": 0,
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "结束行号（0 表示到末尾）",
+                    "default": 0,
+                },
+                "max_lines": {
+                    "type": "integer",
+                    "description": "最大返回行数（分页）",
+                    "default": 200,
+                },
+                "head": {
+                    "type": "integer",
+                    "description": "读取前 N 行（优先级高于 start_line/end_line）",
+                    "default": 0,
+                },
+                "tail": {
+                    "type": "integer",
+                    "description": "读取后 N 行（优先级高于 start_line/end_line）",
+                    "default": 0,
+                },
+                "encoding": {
+                    "type": "string",
+                    "description": "编码：auto / utf-8 / gbk / latin-1",
+                    "default": "auto",
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "模式：auto / text / binary / hex / skeleton / directory",
+                    "default": "auto",
+                },
+                "grep_pattern": {
+                    "type": "string",
+                    "description": "可选：只返回匹配 regex 的行",
+                    "default": "",
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "grep 时的上下文行数",
+                    "default": 0,
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "目录读取时是否递归",
+                    "default": False,
+                },
+            },
+            "required": ["path"],
+        },
+    _file_read,
+)
+
+
 @dataclass
 class GhPrTool(FunctionTool):
     """GitHub Pull Request 操作。"""
@@ -1808,6 +1876,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "gh_repo",
     ],
     "文件系统": [
+        "file_read",
         "es_search",
         "rg_search",
         "dir_tree",
@@ -1890,6 +1959,7 @@ _ALL_TOOLS = {
     "disk_info": DiskInfoTool,
     "file_remove": FileRemoveTool,
     "config_diff": ConfigDiffTool,
+    "file_read": FileReadTool,
     "port_check": PortCheckTool,
     "proc_list": ProcListTool,
     "sys_snapshot": SysSnapshotTool,
