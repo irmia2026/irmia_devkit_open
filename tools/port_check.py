@@ -32,12 +32,16 @@ def check(host: str = "127.0.0.1", port: int = 7860) -> dict:
 
 
 def scan(ports: list[int], host: str = "127.0.0.1") -> dict:
-    """批量检测多个端口。并发扫描，返回每个端口的监听状态。"""
+    """批量检测多个端口。并发扫描，返回每个端口的监听状态。
+    
+    限制并发数以避免触发防火墙/EDR告警。
+    """
     if not ports:
         return {"ok": True, "host": host, "listening": [], "closed": [], "results": []}
     
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(32, len(ports)))) as pool:
+    # 限制 max_workers=8，避免被安全软件标记为端口扫描攻击
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(8, len(ports)))) as pool:
         future_to_port = {pool.submit(check, host, port): port for port in ports}
         for future in concurrent.futures.as_completed(future_to_port):
             port = future_to_port[future]

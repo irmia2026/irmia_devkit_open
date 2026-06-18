@@ -153,12 +153,19 @@ def _result_status(result: Any) -> tuple[str, str]:
     return "ok", ""
 
 
+import atexit
+
+
 # 批量写入缓冲
 _BATCH: list[tuple] = []
 _BATCH_LOCK = threading.Lock()
 _BATCH_SIZE = 10
 _BATCH_FLUSH_INTERVAL = 5.0
 _LAST_FLUSH = 0.0
+
+
+# 注册 atexit 确保进程退出时刷盘
+atexit.register(lambda: _flush(force=True))
 
 
 def _flush(force: bool = False) -> None:
@@ -197,8 +204,11 @@ def _flush(force: bool = False) -> None:
                 _CONN_LOCAL.conn = None
 
 
-def record(tool_name: str, params: dict[str, Any], result: Any, duration_ms: int) -> None:
-    """Best-effort insert. Never raise to callers."""
+def record(tool_name: str, params: dict[str, Any], result: Any, duration_ms: int, *, sync: bool = False) -> None:
+    """Best-effort insert. Never raise to callers.
+    
+    sync=True: 强制立即刷盘（用于关键操作如 safe_edit/safe_write）。
+    """
     try:
         status, error_msg = _result_status(result)
         row = (
@@ -212,7 +222,7 @@ def record(tool_name: str, params: dict[str, Any], result: Any, duration_ms: int
         )
         with _BATCH_LOCK:
             _BATCH.append(row)
-        _flush()
+        _flush(force=sync)
     except Exception:
         pass
 

@@ -73,6 +73,14 @@ def unwrap(result: dict) -> str:
 _RUN_SYNC_LOCK = threading.Lock()
 _RUN_SYNC_EXECUTOR = None
 
+def shutdown_run_sync():
+    """关闭 run_sync 线程池。在插件卸载/热重载时调用，防止线程泄漏。"""
+    global _RUN_SYNC_EXECUTOR
+    if _RUN_SYNC_EXECUTOR is not None:
+        _RUN_SYNC_EXECUTOR.shutdown(wait=False)
+        _RUN_SYNC_EXECUTOR = None
+
+
 async def run_sync(func, *args, **kwargs):
     """在默认线程池中运行同步函数，避免阻塞 AstrBot 事件循环。"""
     global _RUN_SYNC_EXECUTOR
