@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tools import file_read
+from tools import safe_read
 
 
 class TestFileReadBasic:
@@ -14,7 +14,7 @@ class TestFileReadBasic:
         f = Path(tmp_dir) / "utf8.txt"
         f.write_text("hello world\nline 2\nline 3\n", encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["encoding"] in ("utf-8", "ascii")  # ascii 是 utf-8 的子集
@@ -26,7 +26,7 @@ class TestFileReadBasic:
         f = Path(tmp_dir) / "gbk.txt"
         f.write_text("中文内容\n第二行\n", encoding="gbk")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["encoding"] in ("gbk", "GB2312", "GB18030")
@@ -35,7 +35,7 @@ class TestFileReadBasic:
     def test_read_nonexistent_file(self, tmp_dir):
         f = Path(tmp_dir) / "nonexistent.txt"
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is False
         assert "not found" in result["error"].lower() or "Path not found" in result["error"]
@@ -46,7 +46,7 @@ class TestFileReadPagination:
         f = Path(tmp_dir) / "lines.txt"
         f.write_text("\n".join([f"line {i}" for i in range(1, 101)]), encoding="utf-8")
         
-        result = file_read.read(str(f), start_line=10, end_line=20)
+        result = safe_read.read(str(f), start_line=10, end_line=20)
         
         assert result["ok"] is True
         assert result["start_line"] == 10
@@ -59,7 +59,7 @@ class TestFileReadPagination:
         f = Path(tmp_dir) / "lines.txt"
         f.write_text("\n".join([f"line {i}" for i in range(1, 101)]), encoding="utf-8")
         
-        result = file_read.read(str(f), head=5)
+        result = safe_read.read(str(f), head=5)
         
         assert result["ok"] is True
         assert result["start_line"] == 1
@@ -71,7 +71,7 @@ class TestFileReadPagination:
         f = Path(tmp_dir) / "lines.txt"
         f.write_text("\n".join([f"line {i}" for i in range(1, 101)]), encoding="utf-8")
         
-        result = file_read.read(str(f), tail=5)
+        result = safe_read.read(str(f), tail=5)
         
         assert result["ok"] is True
         assert result["start_line"] == 96
@@ -84,7 +84,7 @@ class TestFileReadPagination:
         f = Path(tmp_dir) / "lines.txt"
         f.write_text("\n".join([f"line {i}" for i in range(1, 301)]), encoding="utf-8")
         
-        result = file_read.read(str(f), max_lines=50)
+        result = safe_read.read(str(f), max_lines=50)
         
         assert result["ok"] is True
         assert result["returned_lines"] == 50
@@ -97,7 +97,7 @@ class TestFileReadBinary:
         f = Path(tmp_dir) / "binary.bin"
         f.write_bytes(b"\x00\x01\x02\x03\x89PNG\r\n\x1a\n" + b"\x00" * 100)
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["mode"] == "binary"
@@ -109,7 +109,7 @@ class TestFileReadBinary:
         f = Path(tmp_dir) / "test.bin"
         f.write_bytes(bytes(range(256)))
         
-        result = file_read.read(str(f), mode="hex")
+        result = safe_read.read(str(f), mode="hex")
         
         assert result["ok"] is True
         assert result["mode"] == "hex"
@@ -121,7 +121,7 @@ class TestFileReadBinary:
         # PNG 文件头
         f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 1000)
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["mode"] == "binary"
@@ -136,7 +136,7 @@ class TestFileReadDirectory:
         (d / "file2.py").write_text("content2")
         (d / "subdir").mkdir()
         
-        result = file_read.read(str(d))
+        result = safe_read.read(str(d))
         
         assert result["ok"] is True
         assert result["mode"] == "directory"
@@ -156,7 +156,7 @@ class TestFileReadDirectory:
         sub.mkdir()
         (sub / "nested.txt").write_text("nested")
         
-        result = file_read.read(str(d), recursive=True)
+        result = safe_read.read(str(d), recursive=True)
         
         assert result["ok"] is True
         assert result["mode"] == "directory"
@@ -167,31 +167,6 @@ class TestFileReadDirectory:
         assert "children" in subdir_entry
         assert len(subdir_entry["children"]) == 1
         assert subdir_entry["children"][0]["name"] == "nested.txt"
-
-
-class TestFileReadGrep:
-    def test_grep_pattern(self, tmp_dir):
-        f = Path(tmp_dir) / "code.py"
-        f.write_text("def hello():\n    pass\n\ndef world():\n    pass\n", encoding="utf-8")
-        
-        result = file_read.read(str(f), grep_pattern=r"def \w+")
-        
-        assert result["ok"] is True
-        assert "matches" in result
-        assert len(result["matches"]) == 2
-        assert result["matches"][0]["content"] == "def hello():"
-        assert result["matches"][1]["content"] == "def world():"
-    
-    def test_grep_with_context(self, tmp_dir):
-        f = Path(tmp_dir) / "code.py"
-        f.write_text("# comment\ndef hello():\n    pass\n# end\n", encoding="utf-8")
-        
-        result = file_read.read(str(f), grep_pattern="def hello", context_lines=1)
-        
-        assert result["ok"] is True
-        assert len(result["matches"]) == 1
-        assert "context_before" in result["matches"][0]
-        assert "context_after" in result["matches"][0]
 
 
 class TestFileReadSkeleton:
@@ -209,7 +184,7 @@ def standalone():
     pass
 """, encoding="utf-8")
         
-        result = file_read.read(str(f), mode="skeleton")
+        result = safe_read.read(str(f), mode="skeleton")
         
         assert result["ok"] is True
         assert result["mode"] == "skeleton"
@@ -236,7 +211,7 @@ func helper() {
 }
 """, encoding="utf-8")
         
-        result = file_read.read(str(f), mode="skeleton")
+        result = safe_read.read(str(f), mode="skeleton")
         
         assert result["ok"] is True
         assert result["skeleton"]["language"] == "go"
@@ -248,7 +223,7 @@ class TestFileReadMetadata:
         f = Path(tmp_dir) / "test.txt"
         f.write_text("hello world", encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert "metadata" in result
@@ -261,7 +236,7 @@ class TestFileReadMetadata:
         f = Path(tmp_dir) / "test.txt"
         f.write_text("x" * 2048, encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["human_size"] in ("2.0KB", "2KB")
@@ -274,7 +249,7 @@ class TestFileReadLargeFile:
         # 创建 150KB 文件（超过 LARGE_FILE_THRESHOLD=100KB）
         f.write_text("x" * (150 * 1024), encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["truncated"] is True
@@ -286,7 +261,7 @@ class TestFileReadLargeFile:
         # 创建 11MB 文件（超过 MAX_FILE_SIZE=10MB）
         f.write_text("x" * (11 * 1024 * 1024), encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is False
         assert "too large" in result["error"].lower() or "10MB" in result["error"]
@@ -298,7 +273,7 @@ class TestFileReadEncoding:
         # 写入 Latin-1 编码的字节（ Café 的 é 在 Latin-1 中是 0xe9 ）
         f.write_bytes(b"Caf\xe9\n")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         # 应该被检测为 latin-1 或成功解码
@@ -308,7 +283,7 @@ class TestFileReadEncoding:
         f = Path(tmp_dir) / "test.txt"
         f.write_text("hello", encoding="utf-8")
         
-        result = file_read.read(str(f), encoding="utf-8")
+        result = safe_read.read(str(f), encoding="utf-8")
         
         assert result["ok"] is True
         assert result["encoding"] == "utf-8"
@@ -319,7 +294,7 @@ class TestFileReadEdgeCases:
         f = Path(tmp_dir) / "empty.txt"
         f.write_text("", encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["content"] == ""
@@ -329,7 +304,7 @@ class TestFileReadEdgeCases:
         f = Path(tmp_dir) / "single.txt"
         f.write_text("only one line", encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert result["total_lines"] == 1
@@ -339,7 +314,7 @@ class TestFileReadEdgeCases:
         f = Path(tmp_dir) / "unicode.txt"
         f.write_text("🎉 emoji test\n日本語テスト\n한국어 테스트\n", encoding="utf-8")
         
-        result = file_read.read(str(f))
+        result = safe_read.read(str(f))
         
         assert result["ok"] is True
         assert "🎉" in result["content"]

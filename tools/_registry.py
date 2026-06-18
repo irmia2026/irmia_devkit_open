@@ -100,7 +100,7 @@ from .tool_stats import snapshot as _tool_stats_snap
 from .db_query import query as _db_query
 from .dep_scan import scan as _dep_scan
 from .file_remove import remove as _file_remove
-from .file_read import read as _file_read
+from .safe_read import read as _safe_read
 
 # ── codegraph ──
 from .codegraph import CodeGraph as _CodeGraph
@@ -1081,8 +1081,8 @@ MdStripTool = make_tool(
 
 
 FileReadTool = make_tool(
-    "file_read",
-    "【增强版文件读取——替代 AstrBot 原生 file_read】读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、目录列表、搜索过滤。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常、支持目录读取和 regex 过滤。",
+    "safe_read",
+    "【安全文件读取——替代 AstrBot 原生 file_read】安全读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、目录列表。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常、支持目录读取。搜索请用 rg_search，不要在此工具内使用。",
     {
             "type": "object",
             "properties": {
@@ -1125,14 +1125,14 @@ FileReadTool = make_tool(
                     "description": "模式：auto / text / binary / hex / skeleton / directory",
                     "default": "auto",
                 },
-                "grep_pattern": {
-                    "type": "string",
-                    "description": "可选：只返回匹配 regex 的行",
-                    "default": "",
-                },
-                "context_lines": {
+                "offset": {
                     "type": "integer",
-                    "description": "grep 时的上下文行数",
+                    "description": "hex 模式下的字节偏移",
+                    "default": 0,
+                },
+                "limit_bytes": {
+                    "type": "integer",
+                    "description": "hex 模式下最多读取的字节数",
                     "default": 0,
                 },
                 "recursive": {
@@ -1140,10 +1140,25 @@ FileReadTool = make_tool(
                     "description": "目录读取时是否递归",
                     "default": False,
                 },
+                "max_entries": {
+                    "type": "integer",
+                    "description": "目录读取时最大条目数",
+                    "default": 50,
+                },
+                "include_hidden": {
+                    "type": "boolean",
+                    "description": "目录读取时是否包含隐藏文件",
+                    "default": False,
+                },
+                "include_metadata": {
+                    "type": "boolean",
+                    "description": "是否返回文件/目录元信息",
+                    "default": True,
+                },
             },
             "required": ["path"],
         },
-    _file_read,
+    _safe_read,
 )
 
 
@@ -1876,7 +1891,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "gh_repo",
     ],
     "文件系统": [
-        "file_read",
+        "safe_read",
         "es_search",
         "rg_search",
         "dir_tree",
@@ -1959,7 +1974,7 @@ _ALL_TOOLS = {
     "disk_info": DiskInfoTool,
     "file_remove": FileRemoveTool,
     "config_diff": ConfigDiffTool,
-    "file_read": FileReadTool,
+    "safe_read": FileReadTool,
     "port_check": PortCheckTool,
     "proc_list": ProcListTool,
     "sys_snapshot": SysSnapshotTool,
@@ -1990,3 +2005,14 @@ _ALL_TOOLS = {
     "code_status": CodeStatusTool,
     "symbol_rename": SymbolRenameTool,
 }
+
+
+# 兼容旧名：外部按 file_read 调用时映射到 safe_read
+_TOOL_NAME_ALIASES = {
+    "file_read": "safe_read",
+}
+
+
+def resolve_tool_name(name: str) -> str:
+    """解析工具名，兼容历史别名。"""
+    return _TOOL_NAME_ALIASES.get(name, name)
