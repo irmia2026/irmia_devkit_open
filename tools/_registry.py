@@ -74,6 +74,7 @@ from .gh_cli import (
     pr_create as _gh_pr_create,
     pr_list as _gh_pr_list,
     pr_merge as _gh_pr_merge,
+    pr_review as _gh_pr_review,
     pr_view as _gh_pr_view,
     issue_create as _gh_issue_create,
     issue_list as _gh_issue_list,
@@ -1086,7 +1087,7 @@ class GhPrTool(FunctionTool):
     description: str = (
         "【替代 gh CLI——首选】GitHub PR 管理。"
         "比原生 gh 多一层 --body-file 转义防护，直接返回结构化 JSON。"
-        "action: create/list/merge/view。create 需 title+body；merge 需 number+strategy；view 需 number。"
+        "action: create/list/merge/view/review。create 需 title+body；merge 需 number+strategy；view 需 number；review 需 number，可传 body/review_event。"
     )
     parameters: dict = field(
         default_factory=lambda: {
@@ -1094,8 +1095,8 @@ class GhPrTool(FunctionTool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "操作: create / list / merge / view",
-                    "enum": ["create", "list", "merge", "view"],
+                    "description": "操作: create / list / merge / view / review",
+                    "enum": ["create", "list", "merge", "view", "review"],
                 },
                 "cwd": {"type": "string", "description": "仓库路径，默认当前工作目录"},
                 "title": {"type": "string", "description": "PR 标题（create 时必填）"},
@@ -1121,6 +1122,10 @@ class GhPrTool(FunctionTool):
                     "type": "string",
                     "description": "merge 时合并策略: squash/rebase/merge",
                 },
+                "review_event": {
+                    "type": "string",
+                    "description": "review 时操作: comment/approve/request-changes",
+                },
             },
             "required": ["action"],
         }
@@ -1139,6 +1144,7 @@ class GhPrTool(FunctionTool):
         base: str = "master",
         head: str = "",
         strategy: str = "squash",
+        review_event: str = "comment",
         **kwargs,
     ) -> ToolExecResult:
         _tool_stats.record(self.name)
@@ -1159,6 +1165,12 @@ class GhPrTool(FunctionTool):
                 case "view":
                     result = await _run_sync(
                         _gh_pr_view, cwd or "", number or None
+                    )
+                case "review":
+                    if not number:
+                        return _err("gh_pr review 需要 number 参数")
+                    result = await _run_sync(
+                        _gh_pr_review, cwd or "", number, body, review_event
                     )
                 case _:
                     return _err(f"未知操作: {action}")
