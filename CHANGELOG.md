@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.5.7 — 配置页重构 + Release 安装包补齐
+
+- **配置页重构**: 群配置页改为卡片化布局，支持真实 QQ 群列表、群级工具组开关、单工具禁用和批量操作。
+- **视觉优化**: 新增柔和高饱和配色、明暗主题切换，并使用裁切后的本地插件 Logo 作为配置页头像。
+- **GitHub PR 修复**: 新增 `gh_pr review`，review 正文统一通过 `--body-file` 传递，避免多行内容被 shell 截断。
+- **配置说明**: 明确群配置 `extra_admin_ids` 覆盖默认值而非叠加；配置结构重组后建议在 WebUI 中重新保存一次。
+- **Release 补齐**: 发行版附加可直接下载安装的插件 ZIP 包。
+- **测试**: 相关子集验证 28 passed、1 warning。
+
 ## v2.5.6 — codegraph 性能修复 + review 安全加固
 
 - **op_log 修复**: `_redact_value` 子串匹配改为下划线分词语义匹配，修复 `keyboard`/`monkey` 等参数被 `key` 误脱敏；`_result_status` 非 JSON 字符串返回 `error` 而非 `ok`；`_INITIALIZED_DB` 类型修复（Path→str），修复 Python 3.12 下 `Path == str` 永远 False 导致每次 `record()` 重复建表。

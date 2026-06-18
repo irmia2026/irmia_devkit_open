@@ -214,7 +214,7 @@ python -m pytest tests/ -v
 
 ## 版本
 
-2.5.6 · [Changelog](CHANGELOG.md)
+2.5.7 · [Changelog](CHANGELOG.md)
 
 ## 作者
 
