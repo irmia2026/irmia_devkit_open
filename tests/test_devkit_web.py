@@ -24,8 +24,8 @@ class MockPlatform:
 
 
 class TestDevkitWebGroups:
-    def test_group_list_ignores_config_only_left_groups(self, tmp_dir):
-        cfg_path = Path(tmp_dir) / "group_configs.json"
+    def test_group_list_ignores_config_only_left_groups(self, tmp_path):
+        cfg_path = Path(tmp_path) / "group_configs.json"
         cfg_path.write_text(
             json.dumps(
                 {
