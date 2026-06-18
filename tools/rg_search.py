@@ -50,9 +50,17 @@ def _has_nested_quantifiers(pattern: str) -> bool:
     return bool(re.search(r'\([^()]*[+\*?][^()]*\)[+\*?]', pattern))
 
 
+# 缓存：rg 可用性检查结果
+_RG_AVAILABLE: bool | None = None
+
 def _find_rg() -> str | None:
-    """查找 rg 可执行文件路径，未找到返回 None。"""
-    return shutil.which("rg")
+    """查找 rg 可执行文件路径，缓存结果。"""
+    global _RG_AVAILABLE
+    if _RG_AVAILABLE is not None:
+        return "rg" if _RG_AVAILABLE else None
+    path = shutil.which("rg")
+    _RG_AVAILABLE = path is not None
+    return path
 
 
 _RG_LINE_RE = re.compile(r"^(.*?):(\d+):(.*)$")

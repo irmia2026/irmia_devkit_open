@@ -30,12 +30,20 @@ def _resolve_project_dir(filepath: str = "", project_dir: str = ".") -> Path:
     return Path(project_dir or ".").resolve()
 
 
+# 缓存：测试框架发现结果
+_TEST_DISCOVER_CACHE: dict[str, tuple[str, list[str]]] = {}
+
 def discover(project_dir: Path) -> tuple[str, list[str]]:
+    cache_key = str(project_dir)
+    cached = _TEST_DISCOVER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    
     if (project_dir / "go.mod").exists():
-        return "go", ["go", "test", "./...", "-json"]
-    if (project_dir / "Cargo.toml").exists():
-        return "cargo", ["cargo", "test"]
-    if (project_dir / "package.json").exists():
+        result = ("go", ["go", "test", "./...", "-json"])
+    elif (project_dir / "Cargo.toml").exists():
+        result = ("cargo", ["cargo", "test"])
+    elif (project_dir / "package.json").exists():
         try:
             data = json.loads((project_dir / "package.json").read_text(encoding="utf-8"))
             scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
@@ -43,13 +51,18 @@ def discover(project_dir: Path) -> tuple[str, list[str]]:
             deps.update(data.get("dependencies", {}) if isinstance(data, dict) else {})
             deps.update(data.get("devDependencies", {}) if isinstance(data, dict) else {})
             if "jest" in deps or "jest" in str(scripts.get("test", "")):
-                return "jest", ["npx", "jest", "--json"]
-            if "test" in scripts:
-                return "npm", ["npm", "test"]
+                result = ("jest", ["npx", "jest", "--json"])
+            elif "test" in scripts:
+                result = ("npm", ["npm", "test"])
+            else:
+                result = ("jest", ["npx", "jest", "--json"])
         except Exception:
-            pass
-        return "jest", ["npx", "jest", "--json"]
-    return "pytest", [sys.executable, "-m", "pytest", "-q", "--tb=short"]
+            result = ("jest", ["npx", "jest", "--json"])
+    else:
+        result = ("pytest", [sys.executable, "-m", "pytest", "-q", "--tb=short"])
+    
+    _TEST_DISCOVER_CACHE[cache_key] = result
+    return result
 
 
 def _run(args: list[str], cwd: Path, timeout: int) -> tuple[int, str, str, float, bool]:

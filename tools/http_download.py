@@ -65,7 +65,7 @@ def download(url: str, path: str, overwrite: bool = False, timeout: int = 60) ->
             downloaded = 0
             with open(safe_path, "wb") as f:
                 while True:
-                    chunk = resp.read(8192)
+                    chunk = resp.read(65536)  # 64KB 块，减少 I/O 次数
                     if not chunk:
                         break
                     if downloaded + len(chunk) > _MAX_DOWNLOAD_SIZE:
