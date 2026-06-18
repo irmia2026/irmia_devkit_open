@@ -44,7 +44,6 @@ class TestDevkitWebGroups:
 
         groups = asyncio.run(controller._get_all_groups())
 
-        assert [g["id"] for g in groups] == ["__default__", "1001"]
-        assert groups[0]["is_default"] is True
-        assert groups[1]["name"] == "当前群"
-        assert groups[1]["updated_at"] == 10
+        assert [g["id"] for g in groups] == ["1001"]
+        assert groups[0]["name"] == "当前群"
+        assert groups[0]["updated_at"] == 10

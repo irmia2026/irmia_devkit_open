@@ -1,51 +1,65 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>弥亚开发工具箱</title>
-<link rel="stylesheet" href="./styles.css?v=20260618_groups_layout">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>弥亚开发工具箱 · 配置台</title>
+  <link rel="stylesheet" href="./styles.css?v=20260618_vivid_soft" />
 </head>
 <body>
+  <div class="noise"></div>
+  <aside class="side-rail">
+    <section class="brand-card">
+      <div class="brand-mark">弥</div>
+      <div>
+        <h1>弥亚开发工具箱</h1>
+        <p>权限、工具组、单工具开关</p>
+      </div>
+    </section>
 
-<div class="sidebar">
-  <div class="sidebar-header">
-    <h2>群聊权限配置</h2>
-    <p>默认配置置顶，群配置可单独覆盖</p>
-  </div>
-  <div class="group-list" id="groupList">
-    <!-- JS 动态填充 -->
-  </div>
-</div>
+    <section class="palette-dock">
+      <button id="paletteToggleBtn" class="dock-button" type="button">
+        <span>配色</span><b id="paletteModeLabel">鎏金</b>
+      </button>
+      <button id="appearanceToggleBtn" class="dock-button" type="button">
+        <span>明暗</span><b id="appearanceModeLabel">自动</b>
+      </button>
+      <button id="refreshGroupsBtn" class="dock-button ghost" type="button">
+        <span>刷新</span><b>群聊</b>
+      </button>
+    </section>
 
-<div class="main-content" id="mainContent">
-  <div class="top-actions">
-    <button class="theme-toggle" id="paletteToggleBtn" type="button" title="切换主题色：金奢 / 蓝白 / 炫彩">
-      <span>主题</span><b id="paletteModeLabel">金奢</b>
-    </button>
-  </div>
-  <div class="empty-state" id="emptyState">
-    <div class="icon">⚙️</div>
-    <p>请选择默认配置或某个群聊</p>
-  </div>
-  <div class="config-panel" id="configPanel" style="display:none">
-    <!-- JS 动态填充 -->
-  </div>
-</div>
+    <section class="side-meta">
+      <div><strong id="groupCountLabel">0</strong><span>群聊</span></div>
+      <div><strong id="toolCountLabel">0</strong><span>工具</span></div>
+    </section>
 
-<div class="toast" id="toast"></div>
+    <div class="group-list" id="groupList"></div>
+  </aside>
 
-<div class="confirm-mask" id="confirmMask">
-  <div class="confirm-box">
-    <div class="confirm-title" id="confirmTitle">确认操作</div>
-    <div class="confirm-message" id="confirmMessage"></div>
-    <div class="confirm-actions">
-      <button class="btn btn-secondary" id="confirmCancelBtn">取消</button>
-      <button class="btn btn-primary" id="confirmOkBtn">确认</button>
+  <main class="workspace">
+    <section class="empty-state" id="emptyState">
+      <div class="empty-badge">DEVKIT</div>
+      <h2>选一个群，开始调校工具权限</h2>
+      <p>配置页已卡片化重构。每个工具可单独开关，工具组负责批量控制。</p>
+    </section>
+
+    <section class="config-panel" id="configPanel" style="display:none"></section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="confirm-mask" id="confirmMask">
+    <div class="confirm-box">
+      <div class="confirm-title" id="confirmTitle">确认操作</div>
+      <div class="confirm-message" id="confirmMessage"></div>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" id="confirmCancelBtn">取消</button>
+        <button class="btn btn-primary" id="confirmOkBtn">确认</button>
+      </div>
     </div>
   </div>
-</div>
 
-<script type="module" src="./app.js?v=20260618_groups_layout"></script>
+  <script type="module" src="./app.js?v=20260618_vivid_soft"></script>
 </body>
 </html>
