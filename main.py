@@ -139,7 +139,7 @@ class Main(star.Star):
             enabled.discard(t)
 
         tools = [_ALL_TOOLS[name]() for name in enabled if name in _ALL_TOOLS]
-        tools = [protect_tool(t, allowed_ids) for t in tools]
+        tools = [protect_tool(t, allowed_ids, self._is_tool_allowed_for_event) for t in tools]
         context.add_llm_tools(*tools)
 
         # Rotate op_log session on each plugin init/reload

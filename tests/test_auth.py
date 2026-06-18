@@ -173,6 +173,38 @@ class TestProtectTool:
         assert data["ok"] is False
         assert "内部异常" in data["error"]
 
+    def test_access_checker_passthrough(self):
+        tool = MockTool()
+
+        def checker(event, tool_name):
+            return event.get_sender_id() == "extra" and tool_name == "test_tool"
+
+        wrapped = protect_tool(tool, set(), checker)
+        result = asyncio.run(wrapped.call(_make_context(role="member", sender_id="extra")))
+        assert tool.call_count == 1
+        data = json.loads(result)
+        assert data["ok"] is True
+
+    def test_access_checker_false_blocks(self):
+        tool = MockTool()
+        wrapped = protect_tool(tool, {"123"}, lambda event, tool_name: False)
+        result = asyncio.run(wrapped.call(_make_context(role="admin", sender_id="123")))
+        assert tool.call_count == 0
+        data = json.loads(result)
+        assert data["ok"] is False
+
+    def test_access_checker_exception_blocks(self):
+        tool = MockTool()
+
+        def checker(event, tool_name):
+            raise RuntimeError("boom")
+
+        wrapped = protect_tool(tool, {"123"}, checker)
+        result = asyncio.run(wrapped.call(_make_context(role="admin", sender_id="123")))
+        assert tool.call_count == 0
+        data = json.loads(result)
+        assert data["ok"] is False
+
     def test_protect_tool_returns_same_object(self):
         tool = MockTool()
         wrapped = protect_tool(tool, {"123"})

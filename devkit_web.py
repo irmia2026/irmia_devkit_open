@@ -166,9 +166,9 @@ class DevkitWebController:
                 logger.warning("devkit: 获取群列表失败: %s", exc)
         configs = self._read_group_configs()
         for gid, cfg in configs.items():
-            updated_at = int(cfg.get("updated_at", 0)) if isinstance(cfg, dict) else 0
             if gid not in groups:
-                groups[gid] = {"id": gid, "name": f"群{gid}", "avatar": ""}
+                continue
+            updated_at = int(cfg.get("updated_at", 0)) if isinstance(cfg, dict) else 0
             groups[gid]["updated_at"] = updated_at
         return sorted(groups.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("id") or "")))
 
