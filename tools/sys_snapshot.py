@@ -6,23 +6,24 @@ CPU/内存/进程数/开机时长。Windows: systeminfo+tasklist | Linux: /proc�
 import os
 import platform
 import time
+import threading
 from datetime import datetime, timedelta
 
 from ._helpers import _run_cmd
 
-# 缓存：系统快照（30秒TTL）
+# 缓存：系统快照（30秒TTL），锁保护并发访问
 _SNAP_CACHE = None
 _SNAP_CACHE_TIME = 0
 _SNAP_CACHE_TTL = 30.0
+_SNAP_LOCK = threading.Lock()
 
 
 def snapshot() -> dict:
     """获取系统整体状态快照。"""
-    global _SNAP_CACHE, _SNAP_CACHE_TIME
-    
-    now = time.time()
-    if _SNAP_CACHE is not None and (now - _SNAP_CACHE_TIME) < _SNAP_CACHE_TTL:
-        return _SNAP_CACHE
+    with _SNAP_LOCK:
+        if _SNAP_CACHE is not None:
+            if (time.time() - _SNAP_CACHE_TIME) < _SNAP_CACHE_TTL:
+                return _SNAP_CACHE
     
     info = {
         "hostname": platform.node(),
@@ -47,8 +48,9 @@ def snapshot() -> dict:
         _linux_info(info)
 
     result = {"ok": True, "info": info}
-    _SNAP_CACHE = result
-    _SNAP_CACHE_TIME = now
+    with _SNAP_LOCK:
+        _SNAP_CACHE = result
+        _SNAP_CACHE_TIME = time.time()
     return result
 
 

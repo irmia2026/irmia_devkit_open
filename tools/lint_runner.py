@@ -8,23 +8,30 @@ import sys
 import json
 import re as _re
 import shutil
+import threading
 from pathlib import Path
 
-# 缓存：linter 可用性检查结果
+# 缓存：linter 可用性检查结果，锁保护
+_LINTER_LOCK = threading.Lock()
 _LINTER_AVAIL: dict[str, bool | None] = {"ruff": None, "pylint": None, "eslint": None}
 
 
 def _check_linter(name: str) -> bool:
-    """检查 linter 是否可用，缓存结果。"""
+    """检查 linter 是否可用，缓存结果，线程安全。"""
     avail = _LINTER_AVAIL.get(name)
     if avail is not None:
         return avail
-    if name == "ruff":
-        avail = bool(shutil.which("ruff") or _find_ruff_module())
-    else:
-        avail = bool(shutil.which(name))
-    _LINTER_AVAIL[name] = avail
-    return avail
+    with _LINTER_LOCK:
+        # 双重检查
+        avail = _LINTER_AVAIL.get(name)
+        if avail is not None:
+            return avail
+        if name == "ruff":
+            avail = bool(shutil.which("ruff") or _find_ruff_module())
+        else:
+            avail = bool(shutil.which(name))
+        _LINTER_AVAIL[name] = avail
+        return avail
 
 
 def _find_ruff_module() -> list:

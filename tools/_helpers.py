@@ -5,7 +5,7 @@ _helpers — main.py 和 registry 共用的辅助函数。
 import json
 import os
 import subprocess
-
+import threading
 
 # 预编译的协议字段集合——避免每次调用重新构建
 _PROTOCOL_KEYS = frozenset(("proposal", "options", "evidence", "next_call", "stdout", "stderr", "cmd"))
@@ -45,16 +45,12 @@ def _run_cmd(
         return {"ok": False, "error": str(e)}
 
 
-# err_json 结果缓存——常见错误字符串复用
-_ERR_JSON_CACHE: dict[str, str] = {}
+# err_json 结果缓存——使用 lru_cache 替代裸 dict，线程安全 + 有上限
+from functools import lru_cache
 
+@lru_cache(maxsize=256)
 def err_json(error: str) -> str:
-    cached = _ERR_JSON_CACHE.get(error)
-    if cached is not None:
-        return cached
-    result = json.dumps({"ok": False, "error": error}, ensure_ascii=False)
-    _ERR_JSON_CACHE[error] = result
-    return result
+    return json.dumps({"ok": False, "error": error}, ensure_ascii=False)
 
 
 def unwrap(result: dict) -> str:
@@ -73,20 +69,18 @@ def unwrap(result: dict) -> str:
     return json.dumps({"ok": True, "data": result}, ensure_ascii=False)
 
 
-# 线程池单例——避免每次 run_sync 创建新线程
+# 线程池单例——模块级初始化，避免 DCL 竞态
+_RUN_SYNC_LOCK = threading.Lock()
 _RUN_SYNC_EXECUTOR = None
-_RUN_SYNC_LOCK = None
 
 async def run_sync(func, *args, **kwargs):
     """在默认线程池中运行同步函数，避免阻塞 AstrBot 事件循环。"""
-    global _RUN_SYNC_EXECUTOR, _RUN_SYNC_LOCK
-    if _RUN_SYNC_LOCK is None:
-        import threading
-        _RUN_SYNC_LOCK = threading.Lock()
+    global _RUN_SYNC_EXECUTOR
     if _RUN_SYNC_EXECUTOR is None:
         with _RUN_SYNC_LOCK:
             if _RUN_SYNC_EXECUTOR is None:
                 import concurrent.futures
+                # +4 是为了给 IO 密集型任务留余量，避免线程池饱和
                 _RUN_SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
                     max_workers=min(32, (os.cpu_count() or 1) + 4),
                     thread_name_prefix="irmia_run_sync",

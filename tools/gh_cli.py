@@ -12,9 +12,11 @@ import tempfile
 from .config import get_config
 from ._helpers import _run_cmd
 
-# 缓存：gh 路径和可用性
+# 缓存：gh 路径和可用性（带TTL，因为gh可能被卸载或安装）
 _GH_PATH = None
 _GH_AVAILABLE = None
+_GH_CHECK_TIME = 0
+_GH_CHECK_TTL = 300  # 5分钟TTL
 
 
 def _find_gh() -> str:
@@ -46,9 +48,11 @@ def _find_gh() -> str:
 
 
 def _check_gh_available() -> bool:
-    """检查 gh CLI 是否可用，缓存结果。"""
-    global _GH_AVAILABLE
-    if _GH_AVAILABLE is not None:
+    """检查 gh CLI 是否可用，缓存结果带TTL。"""
+    global _GH_AVAILABLE, _GH_CHECK_TIME
+    import time
+    now = time.time()
+    if _GH_AVAILABLE is not None and (now - _GH_CHECK_TIME) < _GH_CHECK_TTL:
         return _GH_AVAILABLE
     
     gh_bin = _find_gh()
@@ -58,6 +62,7 @@ def _check_gh_available() -> bool:
         _GH_AVAILABLE = result["ok"]
     else:
         _GH_AVAILABLE = True
+    _GH_CHECK_TIME = now
     return _GH_AVAILABLE
 
 

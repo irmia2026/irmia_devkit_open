@@ -19,14 +19,21 @@ _PRIVATE_NETS = frozenset([
     ipaddress.ip_network("fc00::/7"),
 ])
 
-# opener 单例——避免每次请求重新构建
-_SAFE_OPENER = None
+# opener 在模块初始化时构建，避免运行时竞态
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """每次 HTTP 重定向前重新走 SSRF 校验，防止 302→127.0.0.1 绕过。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        err = validate_url(newurl)
+        if err:
+            raise urllib.error.URLError(f"重定向目标被拦截: {err['error']}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
 
 def make_opener():
-    """创建带 SSRF 重定向校验的 URL opener（单例缓存）。"""
-    global _SAFE_OPENER
-    if _SAFE_OPENER is None:
-        _SAFE_OPENER = urllib.request.build_opener(SafeRedirectHandler())
+    """创建带 SSRF 重定向校验的 URL opener（单例）。"""
     return _SAFE_OPENER
 
 

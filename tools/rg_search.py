@@ -12,11 +12,11 @@ from pathlib import Path
 from ._helpers import proposal_reply
 
 # 扫描时跳过的目录名
-_SKIP_DIRS = {
+_SKIP_DIRS = frozenset({
     ".git", "__pycache__", "node_modules", ".venv", "venv",
     ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
     ".eggs", "build", "dist", "target",
-}
+})
 
 # Python fallback 扫描文件上限（防止超时）
 _MAX_FILES_SCANNED = 5000
@@ -25,33 +25,9 @@ _MAX_FILES_SCANNED = 5000
 _MAX_PATTERN_LEN = 1000
 _MAX_TOTAL_SEARCH_STEPS = 500_000
 
-
-def _has_nested_quantifiers(pattern: str) -> bool:
-    """检测常见灾难性回溯模式，如 (a+)+、(a*)*、(a?)+ 等。"""
-    # 直接匹配 (X+)+、(X*)*、(X?)+ 及等价变体
-    stack = []
-    for ch in pattern:
-        if ch == '(':
-            stack.append([])
-        elif ch == ')':
-            if not stack:
-                continue
-            inner = stack.pop()
-            if not inner:
-                continue
-            # 内部是否包含量词
-            has_inner_quant = any(q in inner for q in '+*?')
-            # 括号后紧跟的量词
-            # 这里通过后续字符判断，需要向前看：暂存在解析循环外处理
-        elif stack:
-            stack[-1].append(ch)
-
-    # 更简单可靠：用正则检测 ( [^()]* [+*?] [^()]* ) [+*?]
-    return bool(re.search(r'\([^()]*[+\*?][^()]*\)[+\*?]', pattern))
-
-
 # 缓存：rg 可用性检查结果
 _RG_AVAILABLE: bool | None = None
+
 
 def _find_rg() -> str | None:
     """查找 rg 可执行文件路径，缓存结果。"""
@@ -63,7 +39,13 @@ def _find_rg() -> str | None:
     return path
 
 
+def _has_nested_quantifiers(pattern: str) -> bool:
+    """检测常见灾难性回溯模式，如 (a+)+、(a*)*、(a?)+ 等。"""
+    return bool(re.search(r'\([^()]*[+\*?][^()]*\)[+\*?]', pattern))
+
+
 _RG_LINE_RE = re.compile(r"^(.*?):(\d+):(.*)$")
+_RG_CTX_RE = re.compile(r"^(.*?)([-:])(\d+)([-:])(.*)$")
 
 
 def _parse_rg_output(stdout: str) -> list[dict]:
@@ -81,9 +63,6 @@ def _parse_rg_output(stdout: str) -> list[dict]:
             continue
         matches.append({"file": m.group(1), "line": lineno, "content": m.group(3)})
     return matches
-
-
-_RG_CTX_RE = re.compile(r"^(.*?)([-:])(\d+)([-:])(.*)$")
 
 
 def _parse_rg_with_context(stdout: str) -> list[dict]:
