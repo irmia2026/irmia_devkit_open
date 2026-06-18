@@ -3,6 +3,9 @@ import { createApi } from "./api.js";
 // 弥亚开发工具箱配置页 — 前端逻辑
 
 const bridge = window.AstrBotPluginPage;
+const PALETTE_KEY = "irmia_devkit_palette_mode";
+const PALETTE_MODES = ["luxury", "bluewhite"];
+let paletteMode = "luxury";
 let api = null;
 let toolGroupsDef = {};
 let groupsData = [];
@@ -15,9 +18,60 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, m => map[m]);
 }
 
+function savePaletteLocally(mode) {
+  try { localStorage.setItem(PALETTE_KEY, mode); } catch { /* ignore storage errors */ }
+}
+
+function getStoredPaletteMode() {
+  let saved = paletteMode || "luxury";
+  try { saved = localStorage.getItem(PALETTE_KEY) || saved; } catch { /* ignore storage errors */ }
+  paletteMode = PALETTE_MODES.includes(saved) ? saved : "luxury";
+  return paletteMode;
+}
+
+function applyPalette(mode = getStoredPaletteMode()) {
+  paletteMode = PALETTE_MODES.includes(mode) ? mode : "luxury";
+  document.documentElement.dataset.palette = paletteMode;
+  const label = document.getElementById("paletteModeLabel");
+  if (label) label.textContent = paletteMode === "bluewhite" ? "蓝白" : "金奢";
+}
+
+function cyclePaletteMode() {
+  const current = document.documentElement.dataset.palette || paletteMode || getStoredPaletteMode();
+  const currentIndex = PALETTE_MODES.includes(current) ? PALETTE_MODES.indexOf(current) : 0;
+  const next = PALETTE_MODES[(currentIndex + 1) % PALETTE_MODES.length];
+  paletteMode = next;
+  savePaletteLocally(next);
+  applyPalette(next);
+  saveUiPreferences();
+}
+
+async function loadUiPreferences() {
+  try {
+    const data = await api.safeGet("ui_preferences");
+    const palette = data.preferences?.palette_mode;
+    if (PALETTE_MODES.includes(palette)) {
+      paletteMode = palette;
+      savePaletteLocally(palette);
+      applyPalette(palette);
+      return;
+    }
+  } catch (e) { console.warn("loadUiPreferences", e); }
+  saveUiPreferences();
+}
+
+async function saveUiPreferences() {
+  if (!api) return;
+  try { await api.safePost("ui_preferences/save", { palette_mode: paletteMode }); }
+  catch (e) { console.warn("saveUiPreferences", e); }
+}
+
 // ── 初始化 ──
 
 async function init() {
+  applyPalette();
+  document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
+  await loadUiPreferences();
   await loadToolGroups();
   await loadGlobalAdmins();
   await loadGroups();
