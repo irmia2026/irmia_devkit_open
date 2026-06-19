@@ -169,11 +169,17 @@ def read_file(path: str | Path, *, encoding: str = "auto") -> str:
     return p.read_text(encoding=enc, errors="replace")
 
 
-def read_file_with_encoding(path: str | Path, *, encoding: str = "auto") -> tuple[str, str]:
-    """读取文件内容，同时返回检测到的编码。"""
+def read_file_with_encoding(path: str | Path, *, encoding: str = "auto", max_bytes: int | None = None) -> tuple[str, str]:
+    """读取文件内容，同时返回检测到的编码。
+
+    max_bytes: 最大读取字节数，用于大文件预览场景；None 表示不限制。
+    """
     p = Path(path)
     enc = detect_encoding(p) if encoding == "auto" else encoding
-    return p.read_text(encoding=enc, errors="replace"), enc
+    if max_bytes is None:
+        return p.read_text(encoding=enc, errors="replace"), enc
+    with p.open("r", encoding=enc, errors="replace") as f:
+        return f.read(max_bytes), enc
 
 
 def human_size(n: int) -> str:

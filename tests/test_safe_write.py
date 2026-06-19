@@ -114,3 +114,16 @@ class TestSafeWrite:
         result = write(str(fp), "x" * (21 * 1024 * 1024))
         assert result["ok"] is False
         assert "20MB" in result.get("error", "")
+
+    def test_existing_large_file_preview_limited(self, tmp_dir):
+        """已存在大文件时，overwrite=False 的预览应受字节限制，不读入全文"""
+        fp = Path(tmp_dir) / "large.txt"
+        # 150KB 文件，行长短，超过 _PREVIEW_MAX_BYTES=100KB
+        fp.write_text("line\n" * (30 * 1024), encoding="utf-8")
+        result = write(str(fp), "new content")
+        assert result["ok"] is False
+        assert "proposal" in result
+        assert result["evidence"]["preview_truncated"] is True
+        # 预览只包含有限行，不会把整个 150KB 都读进 evidence
+        preview_lines = result["evidence"]["preview"]["head"] + result["evidence"]["preview"]["tail"]
+        assert len(preview_lines) <= 16  # head 8 + tail 8

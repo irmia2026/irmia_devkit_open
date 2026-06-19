@@ -23,12 +23,13 @@ from datetime import datetime
 from pathlib import Path
 
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE
+from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, detect_encoding
 from .safe_edit import _backup_dir
 from .file_remove import _FORBIDDEN_PREFIXES
 
 
 _PREVIEW_LINES = 8
+_PREVIEW_MAX_BYTES = 100 * 1024  # 100KB：覆盖前预览上限，防止大文件内存爆炸
 _CODE_SUFFIXES = frozenset((".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx"))
 
 
@@ -126,21 +127,24 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
         # ── overwrite=False：返回 proposal + 预览，不写入 ──
         if not overwrite:
             try:
-                existing, _ = read_file_with_encoding(p)
+                existing, _ = read_file_with_encoding(p, max_bytes=_PREVIEW_MAX_BYTES)
+                truncated_preview = p.stat().st_size > _PREVIEW_MAX_BYTES
             except Exception:
                 existing = ""
+                truncated_preview = False
             return {
                 "ok": False,
                 "error": "文件已存在",
                 "proposal": (
                     f"文件已存在（{human_size(p.stat().st_size)}，"
-                    f"{len(existing.splitlines())} 行）。"
+                    f"{len(existing.splitlines())} 行{"+" if truncated_preview else ""}）。"
                     "如需修改局部内容请用 safe_edit；"
                     "如需整体覆盖，设置 overwrite=true（会先备份，可回滚）。"
                 ),
                 "evidence": {
                     "existing_size": p.stat().st_size,
                     "preview": _preview(existing),
+                    "preview_truncated": truncated_preview,
                 },
                 "options": ["改用 safe_edit 做局部修改", "设置 overwrite=true 整体覆盖"],
             }
@@ -159,7 +163,7 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
             pass
 
         try:
-            _, encoding = read_file_with_encoding(p)
+            encoding = detect_encoding(p)
         except Exception:
             encoding = "utf-8"
 
