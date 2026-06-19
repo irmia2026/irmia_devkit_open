@@ -1,6 +1,6 @@
 # Irmia DevKit (弥亚开发工具箱)
 
-An AstrBot plugin providing 63 secure, structured code development tools for LLM Agents.
+An AstrBot plugin providing 64 secure, structured code development tools for LLM Agents.
 
 **Requires**: Python ≥ 3.10, AstrBot any version.
 
@@ -50,9 +50,9 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 
 `syntax_check`/`lint_runner`/`rg_search` include surrounding code context in their results, enabling the LLM to locate issues without an extra file read.
 
-63 tools organized into 10 groups. Disable entire groups or individual tools via `config.json`.
+64 tools organized into 10 groups. Disable entire groups or individual tools via `config.json`.
 
-## Tool List (63)
+## Tool List (64)
 
 ### 🔒 Safe Edit Chain (10)
 
@@ -85,10 +85,11 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 | `gh_release` | Release: create/list |
 | `gh_repo` | Repo: create/view/CI/auth check |
 
-### 📁 File System (11)
+### 📁 File System (12)
 
 | Tool | Description |
 |------|-------------|
+| `safe_read` | Enhanced safe file read: auto-encoding, binary/hex, head/tail, line ranges, directory, skeleton |
 | `es_search` | Everything/locate/fd filename search |
 | `rg_search` | File content search (ripgrep + Python fallback) |
 | `dir_tree` | Directory tree visualization |
@@ -190,11 +191,11 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-180 test cases; current local verification is 180 passed and 8 skipped. Coverage includes SSRF, safe_edit, Zip-slip, SQL injection, ReDoS, registry consistency, linter/test fallback, auth permission checks, semantic indexing, atomic edits, safe command execution, and audit logging.
+209 test cases; current local verification is 209 passed and 8 skipped. Coverage includes SSRF, safe_edit, Zip-slip, SQL injection, ReDoS, registry consistency, linter/test fallback, auth permission checks, semantic indexing, atomic edits, safe command execution, and audit logging.
 
 ## Version
 
-2.5.7 · [Changelog](CHANGELOG.md)
+2.6.0 · [Changelog](CHANGELOG.md)
 
 ## Author
 

@@ -50,7 +50,7 @@ Python ≥ 3.10
 
 `syntax_check`/`lint_runner`/`rg_search` 在返回结果中附带代码上下文片段，帮助 LLM 直接定位问题，无需额外读文件。
 
-63 个工具按 10 组管理，可在 `config.json` 中按组或按单个工具关闭。
+64 个工具按 10 组管理，可在 `config.json` 中按组或按单个工具关闭。
 
 ## 架构
 
@@ -61,7 +61,7 @@ Python ≥ 3.10
 - 安全设计架构（SSRF 四层、safe_edit 防御链、ReDoS 三重盾）
 - 异步执行模型和测试策略
 
-## 工具列表 (63)
+## 工具列表 (64)
 
 ### 🔒 安全编辑链 (10)
 
@@ -94,10 +94,11 @@ Python ≥ 3.10
 | `gh_release` | Release：创建/列出 |
 | `gh_repo` | 仓库：创建/查看/CI/认证 |
 
-### 📁 文件系统 (11)
+### 📁 文件系统 (12)
 
 | 工具 | 用途 |
 |------|------|
+| `safe_read` | 增强版安全文件读取：编码自动检测、二进制/hex、head/tail、行号范围、目录读取、代码骨架 |
 | `es_search` | Everything/locate/fd 文件名搜索 |
 | `rg_search` | 文件内容搜索（ripgrep + Python fallback） |
 | `dir_tree` | 目录树 |
@@ -206,7 +207,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-180 用例；当前本地验证为 180 passed、8 skipped。覆盖 SSRF、safe_edit 防御链、Zip-slip、SQL 注入、ReDoS、注册表一致性、linter/test fallback、权限鉴权、语义索引、原子编辑、安全命令执行和审计日志等。
+209 用例；当前本地验证为 209 passed、8 skipped。覆盖 SSRF、safe_edit 防御链、Zip-slip、SQL 注入、ReDoS、注册表一致性、linter/test fallback、权限鉴权、语义索引、原子编辑、安全命令执行和审计日志等。
 
 ## 英文文档
 
@@ -214,7 +215,7 @@ python -m pytest tests/ -v
 
 ## 版本
 
-2.5.7 · [Changelog](CHANGELOG.md)
+2.6.0 · [Changelog](CHANGELOG.md)
 
 ## 作者
 

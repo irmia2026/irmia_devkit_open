@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.6.0 — 增强文件读取 + 全量安全审查修复
+
+- **新工具**: `safe_read` — 增强版安全文件读取，替代 AstrBot 原生 `file_read`。支持编码自动检测、二进制文件 hex 预览、head/tail、行号范围、目录递归读取、代码骨架提取；失败路径接入项目 proposal 协议，引导 LLM 下一步操作。
+- **安全修复**: SSRF 校验增强，拦截 IPv4 八进制/十六进制/短写法绕过（如 `0177.0.0.1`、`0x7f.0.0.1`、`127.1`）。
+- **安全修复**: `shell_exec` / `test_runner` 增加命令参数路径校验，禁止参数指向 cwd 外绝对路径或通过 `..` 逃逸。
+- **安全修复**: `file_remove` 目录删除改用 `os.walk(followlinks=False)`，不再跟随 symlink 进入外部目录。
+- **安全修复**: `file_zip` 打包改用 `os.walk(followlinks=False)` 并跳过 symlink，防止打包沙箱外文件。
+- **性能修复**: `safe_write` 覆盖已存在文件前预览读取限制为 100KB，编码检测改用 32KB 采样，避免大文件全量读入内存。
+- **性能修复**: `safe_read` tail 模式改为从文件尾部倒读字节块，skeleton 模式限制 512KB/5000 行，行范围模式对大文件停止 EOF 全扫描。
+- **Bug 修复**: `safe_read` 目录 `recursive=True` 时 `max_depth` 实际只生效一层的问题。
+- **Bug 修复**: `sys_snapshot` 缓存变量 `UnboundLocalError`（补充 `global` 声明）。
+- **工程清理**: 移除误提交的 `docs/file_read_design.md`，`docs/` 加入 `.gitignore`。
+- **文档同步**: README / README_EN / metadata 工具数更新为 64，版本号统一为 2.6.0。
+- **测试**: 全量测试 209 passed、8 skipped；新增 `safe_read`、`safe_write` 大文件预览、`shell_exec` 参数逃逸等回归用例。
+
 ## v2.5.7 — 配置页重构 + Release 安装包补齐
 
 - **配置页重构**: 群配置页改为卡片化布局，支持真实 QQ 群列表、群级工具组开关、单工具禁用和批量操作。
