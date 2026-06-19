@@ -22,8 +22,6 @@ Python ≥ 3.10
 | `es_path` | Everything CLI 路径，空自动检测 |
 | `gh_path` | GitHub CLI 路径，空自动检测 |
 | `backup_dir` | safe_edit 备份目录，空 → `~/.irmia/backups` |
-| `state_dir` | （已弃用）异步任务目录 |
-| `lock_dirs` | （已弃用）文件锁检测目录 |
 
 ## 前置依赖
 

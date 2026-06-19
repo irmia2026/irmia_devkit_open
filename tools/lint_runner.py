@@ -8,41 +8,7 @@ import sys
 import json
 import re as _re
 import shutil
-import threading
 from pathlib import Path
-
-# 缓存：linter 可用性检查结果，锁保护
-_LINTER_LOCK = threading.Lock()
-_LINTER_AVAIL: dict[str, bool | None] = {"ruff": None, "pylint": None, "eslint": None}
-
-
-def _check_linter(name: str) -> bool:
-    """检查 linter 是否可用，缓存结果，线程安全。"""
-    avail = _LINTER_AVAIL.get(name)
-    if avail is not None:
-        return avail
-    with _LINTER_LOCK:
-        # 双重检查
-        avail = _LINTER_AVAIL.get(name)
-        if avail is not None:
-            return avail
-        if name == "ruff":
-            avail = bool(shutil.which("ruff") or _find_ruff_module())
-        else:
-            avail = bool(shutil.which(name))
-        _LINTER_AVAIL[name] = avail
-        return avail
-
-
-def _find_ruff_module() -> list:
-    """查找 ruff 模块：优先命令行，备 python -m ruff"""
-    if shutil.which("ruff"):
-        return ["ruff"]
-    try:
-        subprocess.run([sys.executable, "-m", "ruff", "--version"], capture_output=True, timeout=5, check=True)
-        return [sys.executable, "-m", "ruff"]
-    except Exception:
-        return []
 
 
 def run(filepath: str, linter: str = "auto") -> dict:
@@ -87,9 +53,9 @@ def _detect(p: Path) -> str:
     suffix = p.suffix.lower()
     if suffix in (".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"):
         return "eslint"
-    if _check_linter("ruff"):
+    if shutil.which("ruff"):
         return "ruff"
-    if _check_linter("pylint"):
+    if shutil.which("pylint"):
         return "pylint"
     return "ruff"
 
@@ -129,10 +95,21 @@ def _add_context(p: Path, issues: list, max_issues: int = 5) -> None:
                 issue["context"] = ctx
 
 
+def _find_ruff() -> list:
+    """查找 ruff 可执行路径：优先命令行，备 python -m ruff"""
+    if shutil.which("ruff"):
+        return ["ruff"]
+    try:
+        subprocess.run([sys.executable, "-m", "ruff", "--version"], capture_output=True, timeout=5, check=True)
+        return [sys.executable, "-m", "ruff"]
+    except Exception:
+        return []
+
+
 def _run_ruff(p: Path) -> dict:
-    ruff_cmd = _find_ruff_module()
+    ruff_cmd = _find_ruff()
     if not ruff_cmd:
-        if _check_linter("pylint"):
+        if shutil.which("pylint"):
             return {
                 "ok": False,
                 "error": "ruff 未安装，自动回退到 pylint",
@@ -168,8 +145,8 @@ def _run_ruff(p: Path) -> dict:
 
 
 def _run_pylint(p: Path) -> dict:
-    if not _check_linter("pylint"):
-        if _check_linter("ruff"):
+    if not shutil.which("pylint"):
+        if shutil.which("ruff"):
             return {
                 "ok": False,
                 "error": "pylint 未安装，自动回退到 ruff",
@@ -203,7 +180,7 @@ def _run_pylint(p: Path) -> dict:
 
 
 def _run_eslint(p: Path) -> dict:
-    if not _check_linter("eslint"):
+    if not shutil.which("eslint"):
         return {"ok": False, "error": "eslint 未安装，请运行: npm install -g eslint"}
     try:
         r = subprocess.run(

@@ -17,8 +17,6 @@ def set_config(cfg: dict, plugin_dir: str = "") -> None:
     _config.setdefault("backup_dir", str(Path.home() / ".irmia" / "backups"))
     _config.setdefault("gh_path", "")
     _config.setdefault("es_path", "")
-    _config.setdefault("state_dir", "")
-    _config.setdefault("lock_dirs", [])
     _config.setdefault("op_log_db", "")
 
 

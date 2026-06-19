@@ -8,27 +8,8 @@ from tools import op_log
 
 class TestOpLog:
     def test_record_and_recent_query(self, tmp_dir):
-        import os
-        db_path = f"{tmp_dir}/op_log_test1.db"
-        # 确保使用新数据库
-        if os.path.exists(db_path):
-            os.remove(db_path)
+        db_path = f"{tmp_dir}/op_log.db"
         _tool_config.set_config({"op_log_db": db_path}, plugin_dir=tmp_dir)
-        # 重置 session 避免之前测试的残留
-        op_log.reset_session()
-        # 强制刷新之前的 batch
-        op_log._flush(force=True)
-        # 重置计数
-        op_log._BATCH.clear()
-        # 重置初始化标记，确保使用新数据库
-        op_log._INITIALIZED_DB = None
-        # 关闭可能存在的旧连接
-        if hasattr(op_log._CONN_LOCAL, 'conn') and op_log._CONN_LOCAL.conn is not None:
-            try:
-                op_log._CONN_LOCAL.conn.close()
-            except Exception:
-                pass
-            op_log._CONN_LOCAL.conn = None
 
         op_log.record(
             "safe_edit",
@@ -36,12 +17,10 @@ class TestOpLog:
             json.dumps({"ok": True}),
             12,
         )
-        # 强制刷新确保写入
-        op_log._flush(force=True)
         result = op_log.query("recent", limit=5)
 
         assert result["ok"] is True
-        assert result["total_entries"] >= 1
+        assert result["total_entries"] == 1
         assert result["recent"][0]["tool_name"] == "safe_edit"
         assert result["recent"][0]["file_paths"] == "a.py"
         assert "<redacted>" in result["recent"][0]["params_summary"]

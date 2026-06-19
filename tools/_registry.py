@@ -6,13 +6,12 @@ _registry — @dataclass FunctionTool 类定义注册表。
 from __future__ import annotations
 
 import json
-from dataclasses import field
+from dataclasses import dataclass, field
 
 from astrbot.api import FunctionTool as _AstrBotFunctionTool
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
-from pydantic.dataclasses import dataclass
 
 
 @dataclass
@@ -1892,7 +1891,6 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "gh_repo",
     ],
     "文件系统": [
-        "safe_read",
         "es_search",
         "rg_search",
         "dir_tree",
@@ -1904,6 +1902,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "disk_info",
         "file_remove",
         "config_diff",
+        "safe_read",
     ],
     "系统信息": ["port_check", "proc_list", "sys_snapshot", "tool_stats"],
     "执行与审计": ["shell_exec", "op_log"],
@@ -2006,14 +2005,3 @@ _ALL_TOOLS = {
     "code_status": CodeStatusTool,
     "symbol_rename": SymbolRenameTool,
 }
-
-
-# 兼容旧名：外部按 file_read 调用时映射到 safe_read
-_TOOL_NAME_ALIASES = {
-    "file_read": "safe_read",
-}
-
-
-def resolve_tool_name(name: str) -> str:
-    """解析工具名，兼容历史别名。"""
-    return _TOOL_NAME_ALIASES.get(name, name)

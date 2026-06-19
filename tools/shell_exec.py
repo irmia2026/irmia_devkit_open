@@ -71,53 +71,6 @@ def truncate_output(text: str, max_lines: int = 500) -> tuple[str, bool]:
     return joined, True
 
 
-def _is_dangerous_path_arg(arg: str, cwd: Path) -> str | None:
-    """检查命令参数中的路径是否逃逸 cwd。
-
-    仅对看起来像路径的参数做校验（含 /、\\、..、~、盘符开头）。
-    返回错误信息或 None。
-    """
-    if not arg or arg.startswith("-"):
-        return None
-    lowered = arg.replace("\\", "/").lower()
-    # 不是路径样貌的参数直接放行
-    if not (
-        "/" in lowered
-        or ".." in lowered
-        or arg.startswith("~")
-        or (len(arg) >= 2 and arg[1] == ":")
-    ):
-        return None
-    if arg.startswith("~"):
-        return f"参数包含 ~ 展开: {arg}"
-    # 绝对路径：直接解析后比较
-    p = Path(arg)
-    if p.is_absolute():
-        try:
-            p.resolve().relative_to(cwd.resolve())
-        except ValueError:
-            return f"参数指向项目外路径: {arg}"
-        return None
-    # 相对路径：拼接 cwd 后解析，防止 .. 逃逸
-    try:
-        resolved = (cwd / arg).resolve()
-        resolved.relative_to(cwd.resolve())
-    except ValueError:
-        return f"参数逃逸项目目录: {arg}"
-    except OSError:
-        return f"参数路径非法: {arg}"
-    return None
-
-
-def validate_command_args(args: list[str], cwd: Path) -> dict | None:
-    """校验命令参数中所有路径类参数是否位于 cwd 内。"""
-    for arg in args[1:]:  # 跳过 executable
-        err = _is_dangerous_path_arg(arg, cwd)
-        if err:
-            return {"ok": False, "error": err}
-    return None
-
-
 def _to_text(value) -> str:
     if value is None:
         return ""
@@ -189,9 +142,6 @@ def run(
         valid = validate_command(args, allow_high_risk=allow_high_risk)
         if not valid.get("ok"):
             return valid
-        path_check = validate_command_args(args, cwd)
-        if path_check:
-            return path_check
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 

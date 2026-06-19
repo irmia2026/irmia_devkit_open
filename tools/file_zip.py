@@ -19,18 +19,13 @@ def compress(files_or_dir: list[str], output: str) -> dict:
             for path in files_or_dir:
                 p = Path(path)
                 if p.is_dir():
-                    for root, dirs, files in os.walk(p, followlinks=False):
-                        for name in files:
-                            f = Path(root) / name
-                            if f.is_symlink():
-                                continue
-                            if guard.is_seen(str(f)):
-                                continue
+                    for f in p.rglob("*"):
+                        if f.is_file() and not guard.is_seen(str(f)):
                             zf.write(f, f.relative_to(p))
-                elif p.is_file() and not p.is_symlink():
+                elif p.is_file():
                     zf.write(p, p.name)
                 else:
-                    return {"ok": False, "error": f"路径不存在或不是普通文件: {path}"}
+                    return {"ok": False, "error": f"路径不存在: {path}"}
 
         return {
             "ok": True,

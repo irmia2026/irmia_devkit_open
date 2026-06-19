@@ -38,11 +38,14 @@ class DevkitWebController:
             ("/ping", self.page_ping, ["GET"], "Devkit ping"),
             ("/tool_groups", self.page_tool_groups, ["GET"], "Tool group definitions"),
             ("/groups", self.page_list_groups, ["GET"], "QQ group list"),
+            ("/contacts", self.page_list_contacts, ["GET"], "QQ private contact list"),
             ("/group_config", self.page_get_group_config, ["GET"], "Get one group config"),
             ("/group_config/save", self.page_save_group_config, ["POST"], "Save one group config"),
             ("/global_admin_ids", self.page_global_admin_ids, ["GET"], "Global admin IDs"),
             ("/ui_preferences", self.page_ui_preferences, ["GET"], "UI preferences"),
             ("/ui_preferences/save", self.page_save_ui_preferences, ["POST"], "Save UI preferences"),
+            ("/path_options", self.page_path_options, ["GET"], "Optional external paths"),
+            ("/path_options/save", self.page_save_path_options, ["POST"], "Save optional external paths"),
         ]
         for path, handler, methods, desc in routes:
             self.context.register_web_api(
@@ -73,6 +76,9 @@ class DevkitWebController:
     def _group_config_file(self) -> str:
         return str(getattr(self.plugin, "_group_configs_path", ""))
 
+    def _config_file(self) -> str:
+        return str(getattr(self.plugin, "_config_path", ""))
+
     def _ui_preferences_file(self) -> str:
         group_config_file = self._group_config_file()
         if group_config_file:
@@ -87,7 +93,59 @@ class DevkitWebController:
 
     @staticmethod
     def _valid_group_id(group_id: str) -> bool:
+        if group_id == "__default__":
+            return True
+        if group_id.startswith("private:"):
+            return 8 < len(group_id) <= 80
         return bool(group_id) and len(group_id) <= 64
+
+    def _apply_runtime_group_configs(self, configs: dict[str, Any]) -> None:
+        if hasattr(self.plugin, "_group_config_enabled"):
+            self.plugin._group_config_enabled = True
+        if hasattr(self.plugin, "_group_configs_cache"):
+            self.plugin._group_configs_cache = configs
+        else:
+            logger.warning("plugin 缺少 _group_configs_cache 属性，缓存未更新")
+        self._persist_group_config_enabled()
+
+    def _persist_group_config_enabled(self) -> None:
+        config_file = self._config_file()
+        if not config_file:
+            return
+        try:
+            config_data = self._read_main_config()
+            config_data["group_config_enabled"] = True
+            self._write_main_config(config_data)
+        except Exception as exc:
+            logger.warning("devkit: group_config_enabled 持久化失败: %s", exc)
+
+    def _read_main_config(self) -> dict[str, Any]:
+        config_file = self._config_file()
+        if not config_file or not os.path.exists(config_file):
+            return {}
+        try:
+            with open(config_file, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            logger.warning("devkit: config.json 读取失败，已使用空配置")
+            return {}
+
+    def _write_main_config(self, data: dict[str, Any]) -> None:
+        config_file = self._config_file()
+        if not config_file:
+            raise RuntimeError("config path is unavailable")
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        tmp = f"{config_file}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, config_file)
+
+    def _ensure_default_config(self, configs: dict[str, Any]) -> bool:
+        if isinstance(configs.get("__default__"), dict):
+            return False
+        configs["__default__"] = self._default_group_config("__default__")
+        return True
 
     # ── API ──
 
@@ -99,15 +157,29 @@ class DevkitWebController:
         return self._jsonify({"ok": True, "groups": {k: v for k, v in TOOL_GROUPS.items()}})
 
     async def page_list_groups(self):
+        configs = self._read_group_configs()
+        if self._ensure_default_config(configs):
+            self._write_group_configs(configs)
+            self._apply_runtime_group_configs(configs)
         groups = await self._get_all_groups()
         return self._jsonify({"ok": True, "groups": groups})
+
+    async def page_list_contacts(self):
+        contacts = await self._get_all_private_contacts()
+        return self._jsonify({"ok": True, "contacts": contacts})
 
     async def page_get_group_config(self):
         group_id = self._normalize_group_id(self._request().args.get("group_id", ""))
         if not self._valid_group_id(group_id):
             return self._jsonify({"ok": False, "error": "invalid group_id"}), 400
         configs = self._read_group_configs()
-        cfg = configs.get(group_id, self._default_group_config(group_id))
+        cfg = configs.get(group_id)
+        if not isinstance(cfg, dict):
+            cfg = self._default_group_config(group_id)
+            if group_id == "__default__":
+                configs[group_id] = cfg
+                self._write_group_configs(configs)
+                self._apply_runtime_group_configs(configs)
         return self._jsonify({"ok": True, "config": cfg})
 
     async def page_save_group_config(self):
@@ -131,11 +203,22 @@ class DevkitWebController:
         configs = self._read_group_configs()
         configs[group_id] = clean
         self._write_group_configs(configs)
-        if hasattr(self.plugin, "_group_configs_cache"):
-            self.plugin._group_configs_cache = configs
-        else:
-            logger.warning("plugin 缺少 _group_configs_cache 属性，缓存未更新")
+        self._apply_runtime_group_configs(configs)
         return self._jsonify({"ok": True})
+
+    async def page_path_options(self):
+        keys = ("es_path", "gh_path", "backup_dir")
+        data = self._read_main_config()
+        return self._jsonify({"ok": True, "paths": {k: str(data.get(k, "") or "") for k in keys}})
+
+    async def page_save_path_options(self):
+        payload = await self._request().get_json(force=True, silent=True) or {}
+        keys = ("es_path", "gh_path", "backup_dir")
+        data = self._read_main_config()
+        for key in keys:
+            data[key] = str(payload.get(key, "") or "").strip()
+        self._write_main_config(data)
+        return self._jsonify({"ok": True, "paths": {k: data[k] for k in keys}})
 
     async def page_global_admin_ids(self):
         try:
@@ -164,7 +247,16 @@ class DevkitWebController:
         self._write_ui_preferences(prefs)
         return self._jsonify({"ok": True, "preferences": prefs})
 
-    # ── 群列表 ──
+    # ── 群/私聊列表 ──
+
+    @staticmethod
+    def _items_from_result(result: Any) -> list[Any]:
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            data = result.get("data", [])
+            return data if isinstance(data, list) else []
+        return []
 
     async def _get_all_groups(self) -> list[dict[str, str]]:
         groups: dict[str, dict[str, str]] = {}
@@ -181,8 +273,7 @@ class DevkitWebController:
                 continue
             try:
                 result = await client.call_action("get_group_list")
-                items = result if isinstance(result, list) else result.get("data", []) if isinstance(result, dict) else []
-                for item in items:
+                for item in self._items_from_result(result):
                     if not isinstance(item, dict):
                         continue
                     gid = self._normalize_group_id(item.get("group_id", ""))
@@ -190,18 +281,63 @@ class DevkitWebController:
                         continue
                     name = str(item.get("group_name") or item.get("name") or f"群{gid}")
                     avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("group_avatar") or "")
-                    groups[gid] = {"id": gid, "name": name, "avatar": avatar}
+                    member_count = item.get("member_count") or item.get("member_num") or item.get("member_total") or item.get("max_member_count") or ""
+                    groups[gid] = {"id": gid, "name": name, "avatar": avatar, "member_count": str(member_count or "")}
             except AttributeError as exc:
                 logger.debug("devkit: 当前平台不支持 get_group_list: %s", exc)
             except Exception as exc:
                 logger.warning("devkit: 获取群列表失败: %s", exc)
         configs = self._read_group_configs()
         for gid, cfg in configs.items():
+            if gid == "__default__":
+                continue
             if gid not in groups:
                 continue
             updated_at = int(cfg.get("updated_at", 0)) if isinstance(cfg, dict) else 0
             groups[gid]["updated_at"] = updated_at
         return sorted(groups.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("id") or "")))
+
+    @staticmethod
+    def _qq_avatar_url(user_id: str) -> str:
+        return f"https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=100" if user_id.isdigit() else ""
+
+    async def _get_all_private_contacts(self) -> list[dict[str, str]]:
+        contacts: dict[str, dict[str, str]] = {}
+        try:
+            platform_insts = self.context.platform_manager.platform_insts
+        except Exception:
+            platform_insts = []
+        for inst in platform_insts:
+            try:
+                client = inst.get_client()
+            except Exception:
+                continue
+            if client is None:
+                continue
+            try:
+                result = await client.call_action("get_friend_list")
+                for item in self._items_from_result(result):
+                    if not isinstance(item, dict):
+                        continue
+                    uid = self._normalize_group_id(item.get("user_id") or item.get("id") or item.get("uin") or "")
+                    if not uid:
+                        continue
+                    cid = f"private:{uid}"
+                    name = str(item.get("nickname") or item.get("remark") or item.get("name") or f"用户{uid}")
+                    avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("user_avatar") or self._qq_avatar_url(uid))
+                    contacts[cid] = {"id": cid, "name": name, "avatar": avatar, "user_id": uid, "kind": "private"}
+            except AttributeError as exc:
+                logger.debug("devkit: 当前平台不支持 get_friend_list: %s", exc)
+            except Exception as exc:
+                logger.warning("devkit: 获取私聊列表失败: %s", exc)
+        configs = self._read_group_configs()
+        for cid, cfg in configs.items():
+            if not cid.startswith("private:") or not isinstance(cfg, dict):
+                continue
+            uid = cid.split(":", 1)[1]
+            contacts.setdefault(cid, {"id": cid, "name": f"用户{uid}", "avatar": self._qq_avatar_url(uid), "user_id": uid, "kind": "private"})
+            contacts[cid]["updated_at"] = int(cfg.get("updated_at", 0))
+        return sorted(contacts.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("user_id") or "")))
 
     # ── 群配置 ──
 
@@ -233,6 +369,16 @@ class DevkitWebController:
         config_file = self._group_config_file()
         if not config_file:
             raise RuntimeError("group config path is unavailable")
+        if configs and os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8-sig") as f:
+                    existing = json.load(f)
+                if isinstance(existing, dict):
+                    merged = dict(existing)
+                    merged.update(configs)
+                    configs = merged
+            except Exception:
+                logger.warning("group_configs.json 合并失败，将直接写入新配置")
         os.makedirs(os.path.dirname(config_file), exist_ok=True)
         tmp = f"{config_file}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:

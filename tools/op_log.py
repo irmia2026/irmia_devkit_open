@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -23,8 +22,6 @@ def reset_session() -> str:
     global _SESSION_ID
     _SESSION_ID = uuid.uuid4().hex
     return _SESSION_ID
-
-
 _SENSITIVE_KEYS = ("token", "secret", "password", "passwd", "pwd", "key", "private_key", "credential", "api_key", "authorization", "cookie")
 
 
@@ -38,7 +35,6 @@ def _db_path() -> Path:
 
 
 _INITIALIZED_DB: str | None = None
-_INIT_LOCK = threading.Lock()
 
 
 def _ensure_db() -> None:
@@ -49,55 +45,37 @@ def _ensure_db() -> None:
     path = _db_path()
     if _INITIALIZED_DB == str(path):
         return
-    with _INIT_LOCK:
-        if _INITIALIZED_DB == str(path):
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(path))
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("""CREATE TABLE IF NOT EXISTS op_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                tool_name TEXT NOT NULL,
-                params_summary TEXT,
-                file_paths TEXT,
-                result TEXT NOT NULL,
-                error_msg TEXT,
-                duration_ms INTEGER,
-                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-            )""")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_op_log_session ON op_log(session_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_op_log_tool ON op_log(tool_name)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_op_log_created ON op_log(created_at)")
-            conn.commit()
-        finally:
-            conn.close()
-        _INITIALIZED_DB = str(path)
-
-
-# 连接池：线程级复用 + 单例管理
-_CONN_LOCAL = threading.local()
-_CONN_LOCK = threading.Lock()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.execute("""CREATE TABLE IF NOT EXISTS op_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        params_summary TEXT,
+        file_paths TEXT,
+        result TEXT NOT NULL,
+        error_msg TEXT,
+        duration_ms INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_op_log_session ON op_log(session_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_op_log_tool ON op_log(tool_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_op_log_created ON op_log(created_at)")
+    conn.commit()
+    conn.close()
+    _INITIALIZED_DB = str(path)
 
 
 def _connect() -> sqlite3.Connection:
     _ensure_db()
-    # 检查当前线程是否已有连接
-    if hasattr(_CONN_LOCAL, 'conn') and _CONN_LOCAL.conn is not None:
-        try:
-            _CONN_LOCAL.conn.execute("SELECT 1")
-            return _CONN_LOCAL.conn
-        except sqlite3.Error:
-            pass  # 连接已失效，重新创建
     conn = sqlite3.connect(str(_db_path()))
     conn.row_factory = sqlite3.Row
-    _CONN_LOCAL.conn = conn
     return conn
 
 
 def _redact_value(key: str, value: Any) -> Any:
     lowered = key.lower()
+    # 拆分为下划线分隔的词，精确匹配防止 key→keyboard/monkey 过度脱敏
     parts = lowered.replace("-", "_").split("_")
     if any(marker in parts for marker in _SENSITIVE_KEYS):
         return "<redacted>"
@@ -153,101 +131,56 @@ def _result_status(result: Any) -> tuple[str, str]:
     return "ok", ""
 
 
-# 批量写入缓冲
-_BATCH: list[tuple] = []
-_BATCH_LOCK = threading.Lock()
-_BATCH_SIZE = 10
-_BATCH_FLUSH_INTERVAL = 5.0
-_LAST_FLUSH = 0.0
-
-
-def shutdown() -> None:
-    """插件卸载/热重载时调用：强制刷盘并清理线程级连接。"""
-    _flush(force=True)
-    # 关闭当前线程的连接（如果存在）
-    if hasattr(_CONN_LOCAL, 'conn') and _CONN_LOCAL.conn is not None:
-        try:
-            _CONN_LOCAL.conn.close()
-        except Exception:
-            pass
-        _CONN_LOCAL.conn = None
-
-
-def _flush(force: bool = False) -> None:
-    """将缓冲的日志写入数据库。"""
-    global _BATCH, _LAST_FLUSH
-    with _BATCH_LOCK:
-        if not _BATCH:
-            return
-        if not force and len(_BATCH) < _BATCH_SIZE:
-            now = time.time()
-            if now - _LAST_FLUSH < _BATCH_FLUSH_INTERVAL:
-                return
-        
-        batch_copy = _BATCH[:]
-        _BATCH = []
-        _LAST_FLUSH = time.time()
-    
+def record(tool_name: str, params: dict[str, Any], result: Any, duration_ms: int) -> None:
+    """Best-effort insert. Never raise to callers."""
     conn = None
     try:
+        status, error_msg = _result_status(result)
         conn = _connect()
-        conn.executemany(
+        conn.execute(
             "INSERT INTO op_log(session_id, tool_name, params_summary, file_paths, result, error_msg, duration_ms) "
             "VALUES(?,?,?,?,?,?,?)",
-            batch_copy,
+            (
+                _SESSION_ID,
+                tool_name,
+                _params_summary(params),
+                _extract_file_paths(params),
+                status,
+                error_msg,
+                int(duration_ms),
+            ),
         )
         conn.commit()
     except Exception:
         pass
     finally:
         if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            if hasattr(_CONN_LOCAL, 'conn'):
-                _CONN_LOCAL.conn = None
-
-
-def record(tool_name: str, params: dict[str, Any], result: Any, duration_ms: int, *, sync: bool = False) -> None:
-    """Best-effort insert. Never raise to callers.
-    
-    sync=True: 强制立即刷盘（用于关键操作如 safe_edit/safe_write）。
-    """
-    try:
-        status, error_msg = _result_status(result)
-        row = (
-            _SESSION_ID,
-            tool_name,
-            _params_summary(params),
-            _extract_file_paths(params),
-            status,
-            error_msg,
-            int(duration_ms),
-        )
-        with _BATCH_LOCK:
-            _BATCH.append(row)
-        _flush(force=sync)
-    except Exception:
-        pass
+            conn.close()
 
 
 def record_exception(tool_name: str, params: dict[str, Any], exc: Exception, duration_ms: int) -> None:
+    conn = None
     try:
-        row = (
-            _SESSION_ID,
-            tool_name,
-            _params_summary(params),
-            _extract_file_paths(params),
-            "error",
-            str(exc)[:500],
-            int(duration_ms),
+        conn = _connect()
+        conn.execute(
+            "INSERT INTO op_log(session_id, tool_name, params_summary, file_paths, result, error_msg, duration_ms) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                _SESSION_ID,
+                tool_name,
+                _params_summary(params),
+                _extract_file_paths(params),
+                "error",
+                str(exc)[:500],
+                int(duration_ms),
+            ),
         )
-        with _BATCH_LOCK:
-            _BATCH.append(row)
-        _flush()
+        conn.commit()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _rows_to_dicts(rows) -> list[dict]:
@@ -266,10 +199,6 @@ def query(action: str = "recent", limit: int = 10, file: str = "", tool: str = "
     action = (action or "recent").strip().lower()
     limit = _clamp_limit(limit)
     start = time.monotonic()
-    
-    # 查询前先刷新缓冲
-    _flush(force=True)
-    
     conn = _connect()
     try:
         total = conn.execute("SELECT COUNT(*) FROM op_log").fetchone()[0]
@@ -322,5 +251,3 @@ def query(action: str = "recent", limit: int = 10, file: str = "", tool: str = "
         return {"ok": False, "error": f"unknown action: {action}"}
     finally:
         conn.close()
-        if hasattr(_CONN_LOCAL, 'conn'):
-            _CONN_LOCAL.conn = None

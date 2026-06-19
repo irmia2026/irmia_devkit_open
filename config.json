@@ -2,7 +2,7 @@
   "_comment": "弥亚开发工具箱配置。allowed_ids 填额外允许的用户 ID（逗号分隔）。插件自动读取 AstrBot 管理员列表。",
   "owner_sid": "",
   "allowed_ids": "",
-  "group_config_enabled": false,
+  "group_config_enabled": true,
   "tool_groups": {
     "安全编辑链": true,
     "Git & GitHub": true,
@@ -13,12 +13,12 @@
     "编码": true,
     "时间": true,
     "扩展": true,
-    "代码理解": true
+    "代码理解": true,
+    "执行与审计": true,
+    "编码/时间（合并）": true
   },
   "disabled_tools": "",
   "es_path": "",
   "gh_path": "",
-  "state_dir": "",
-  "lock_dirs": "",
   "backup_dir": ""
 }

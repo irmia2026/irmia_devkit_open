@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>弥亚开发工具箱 · 配置台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260618_brand_logo_crop" />
+  <link rel="stylesheet" href="./styles.css?v=20260619_devkit_logo_sync" />
 </head>
 <body>
   <div class="noise"></div>
   <aside class="side-rail">
     <section class="brand-card">
-      <img class="brand-mark" src="./brand_logo.png" alt="弥亚开发工具箱 Logo" />
+      <img class="brand-mark" src="./brand_logo.png?v=20260619_devkit_logo_sync" alt="弥亚开发工具箱 Logo" />
       <div>
         <h1>弥亚开发工具箱</h1>
         <p>权限、工具组、单工具开关</p>
@@ -25,13 +25,13 @@
         <span>明暗</span><b id="appearanceModeLabel">自动</b>
       </button>
       <button id="refreshGroupsBtn" class="dock-button ghost" type="button">
-        <span>刷新</span><b>群聊</b>
+        <span>刷新</span><b>列表</b>
       </button>
     </section>
 
     <section class="side-meta">
       <div><strong id="groupCountLabel">0</strong><span>群聊</span></div>
-      <div><strong id="toolCountLabel">0</strong><span>工具</span></div>
+      <div><strong id="privateCountLabel">0</strong><span>私聊</span></div>
     </section>
 
     <div class="group-list" id="groupList"></div>
@@ -40,8 +40,8 @@
   <main class="workspace">
     <section class="empty-state" id="emptyState">
       <div class="empty-badge">DEVKIT</div>
-      <h2>选一个群，开始调校工具权限</h2>
-      <p>配置页已卡片化重构。每个工具可单独开关，工具组负责批量控制。</p>
+      <h2>选择全局群聊或私聊开始调校工具权限</h2>
+      <p>左侧可选全局设置群聊配置和私聊配置 每个工具单独开关保存即可生效</p>
     </section>
 
     <section class="config-panel" id="configPanel" style="display:none"></section>
@@ -60,6 +60,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20260618_brand_logo_crop"></script>
+  <script type="module" src="./app.js?v=20260619_devkit_logo_sync"></script>
 </body>
 </html>

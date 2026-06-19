@@ -15,7 +15,7 @@
         "default": ""
       },
       "group_config_enabled": {
-        "description": "启用前端分群配置。开启后可设置默认群配置、群管理员、工具组和单工具开关。（需重启生效）",
+        "description": "启用前端分群配置。开启后可设置默认群配置、群管理员、工具组和单工具开关。",
         "type": "bool",
         "default": false
       }
@@ -25,6 +25,16 @@
     "description": "工具组和单工具总开关。先按工具组控制，再用单工具禁用做精细限制。",
     "type": "object",
     "items": {
+      "enable_all_tools": {
+        "description": "开启全部工具。启用后会打开所有工具组并清空单工具禁用列表，保存并重载插件后生效。",
+        "type": "bool",
+        "default": false
+      },
+      "disable_all_tools": {
+        "description": "关闭全部工具。启用后会关闭所有工具组并禁用全部单工具，保存并重载插件后生效。若同时开启两个批量项，优先执行开启全部工具。",
+        "type": "bool",
+        "default": false
+      },
       "tool_groups": {
         "description": "工具组总开关（关闭整组会禁用该组所有工具，需重启生效）",
         "type": "object",
@@ -72,22 +82,6 @@
             "default": ""
           }
         }
-      }
-    }
-  },
-  "兼容保留": {
-    "description": "历史字段，仅为兼容旧配置保留。新安装通常不需要修改。",
-    "type": "object",
-    "items": {
-      "state_dir": {
-        "description": "（已弃用）异步任务状态文件目录，保留仅为向后兼容。",
-        "type": "string",
-        "default": ""
-      },
-      "lock_dirs": {
-        "description": "（已弃用）文件锁检测目录，保留仅为向后兼容。",
-        "type": "string",
-        "default": ""
       }
     }
   }
