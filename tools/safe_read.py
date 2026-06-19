@@ -49,6 +49,31 @@ MAX_DIR_ENTRIES = 50                     # 目录读取最大条目数
 SKELETON_MAX_SIZE = 512 * 1024           # skeleton 模式最大处理 512KB
 SKELETON_MAX_LINES = 5000                # skeleton 模式最多处理 5000 行
 
+# 字节级硬限制（对齐原生 file_read 的安全水位）
+PROBE_BYTES = 512                        # 编码探针只读 512B
+MAX_RETURN_BYTES = 128 * 1024            # 单次返回内容上限 128KB（约 25K tokens）
+MAX_FULL_READ_BYTES = 256 * 1024         # 全量文本读取硬上限 256KB
+
+
+# ── 内容截断辅助 ──
+
+def _truncate_content_by_bytes(lines: list[str], max_bytes: int) -> tuple[list[str], bool]:
+    """按字节数截断行列表，在完整行边界截断，返回 (截断后的行, 是否被截断)。"""
+    if not lines:
+        return lines, False
+    result = []
+    total = 0
+    for line in lines:
+        # 每行在返回时占用 line + '\n' 的字节数
+        line_bytes = len(line.encode("utf-8")) + 1
+        if result and total + line_bytes > max_bytes:
+            return result, True
+        result.append(line)
+        total += line_bytes
+        if total >= max_bytes:
+            return result, True
+    return result, False
+
 
 # ── Hex Preview ──
 
@@ -757,6 +782,8 @@ def read(
     # 文本模式
     if head > 0:
         lines, total_lines, has_more = _read_head(p, detected_encoding, head)
+        lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
+        has_more = has_more or byte_truncated
         
         return {
             'ok': True,
@@ -779,6 +806,8 @@ def read(
     
     if tail > 0:
         lines, total_lines, start_line, has_more = _read_tail(p, detected_encoding, tail)
+        lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
+        has_more = has_more or byte_truncated
         
         return {
             'ok': True,
@@ -803,8 +832,10 @@ def read(
     lines, actual_start, actual_end, total_lines, has_more = _read_lines_range(
         p, detected_encoding, start_line, end_line, max_lines
     )
+    lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
+    has_more = has_more or byte_truncated
     
-    truncated = has_more or (file_size > LARGE_FILE_THRESHOLD)
+    truncated = has_more or (file_size > LARGE_FILE_THRESHOLD) or byte_truncated
     truncation_reason = ''
     if truncated:
         if file_size > LARGE_FILE_THRESHOLD:
@@ -812,6 +843,8 @@ def read(
             truncation_reason = f'File is large ({hs}). Showing lines {actual_start}-{actual_end} of {total_lines}. Use start_line={actual_end+1} to continue.'
         else:
             truncation_reason = f'Showing lines {actual_start}-{actual_end} of {total_lines}. Use start_line={actual_end+1} to continue.'
+        if byte_truncated:
+            truncation_reason += f' Content truncated to {human_size(MAX_RETURN_BYTES)}.'
     
     return {
         'ok': True,

@@ -29,7 +29,7 @@ class TestFileReadBasic:
         result = safe_read.read(str(f))
         
         assert result["ok"] is True
-        assert result["encoding"] in ("gbk", "GB2312", "GB18030")
+        assert result["encoding"] in ("gbk", "GB2312", "GB18030", "gb18030")
         assert "中文内容" in result["content"]
     
     def test_read_nonexistent_file(self, tmp_dir):
@@ -278,7 +278,7 @@ class TestFileReadEncoding:
         assert result["ok"] is True
         # 应该被检测为 latin-1 或成功解码
         assert "Caf" in result["content"]
-    
+
     def test_explicit_encoding(self, tmp_dir):
         f = Path(tmp_dir) / "test.txt"
         f.write_text("hello", encoding="utf-8")
@@ -287,6 +287,30 @@ class TestFileReadEncoding:
         
         assert result["ok"] is True
         assert result["encoding"] == "utf-8"
+
+    def test_utf8_bom_detection(self, tmp_dir):
+        f = Path(tmp_dir) / "bom.txt"
+        f.write_bytes(b"\xef\xbb\xbfhello world\n")
+        
+        result = safe_read.read(str(f))
+        
+        assert result["ok"] is True
+        assert result["encoding"] == "utf-8-sig"
+        assert "hello world" in result["content"]
+
+    def test_byte_limit_truncation(self, tmp_dir):
+        """超长单行文件应被字节上限截断。"""
+        f = Path(tmp_dir) / "longline.txt"
+        # 每行 1000 个 'x'，200 行 = 200KB+，超过 MAX_RETURN_BYTES=128KB
+        f.write_text("\n".join(f"line {i}: {"x" * 1000}" for i in range(200)), encoding="utf-8")
+        
+        result = safe_read.read(str(f), max_lines=200)
+        
+        assert result["ok"] is True
+        assert result["truncated"] is True
+        assert result["returned_lines"] < 200
+        # 返回内容字节数应不超过上限（允许少量余量）
+        assert len(result["content"].encode("utf-8")) <= 128 * 1024 + 1024
 
 
 class TestFileReadEdgeCases:

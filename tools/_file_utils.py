@@ -32,6 +32,28 @@ _TEXT_EXTENSIONS = frozenset({
 })
 
 
+# 文本编码探测相关常量
+_PROBE_BYTES = 512  # 文件探针字节数
+_TEXT_ENCODINGS = (
+    "utf-8-sig",
+    "utf-8",
+    "gb18030",
+    "utf-16",
+    "utf-16-le",
+    "utf-16-be",
+    "utf-32",
+    "utf-32-le",
+    "utf-32-be",
+)
+_UTF_BOMS: tuple[tuple[bytes, str], ...] = (
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xff\xfe\x00\x00", "utf-32-le"),
+    (b"\x00\x00\xfe\xff", "utf-32-be"),
+    (b"\xff\xfe", "utf-16-le"),
+    (b"\xfe\xff", "utf-16-be"),
+)
+
+
 def _has_chardet() -> bool:
     """检查是否安装了 chardet。"""
     try:
@@ -41,16 +63,86 @@ def _has_chardet() -> bool:
         return False
 
 
-def detect_encoding(path: str | Path) -> str:
-    """检测文件编码：chardet → UTF-8 BOM → UTF-8 → GBK → Latin-1。"""
+def _looks_like_text(s: str) -> bool:
+    """文本特征验证：控制字符 <2% 且可打印字符 >=85%。"""
+    if not s:
+        return True
+    total = max(len(s), 1)
+    disallowed = sum(1 for c in s if ord(c) < 32 and c not in "\t\n\r")
+    printable = sum(1 for c in s if c.isprintable() or c in "\t\n\r")
+    return disallowed / total <= 0.02 and printable / total >= 0.85
+
+
+def _looks_like_utf16_or_32(raw: bytes) -> bool:
+    """通过奇偶字节零值比例判断是否可能是 UTF-16/32。
+
+    UTF-16/32 编码 ASCII 字符时隔字节为 \x00；若两侧零值比例都 <80%，
+    则大概率不是 UTF-16/32，跳过尝试避免在二进制上浪费时间。
+    """
+    if len(raw) < 4:
+        return False
+    odd_bytes = raw[1::2]
+    even_bytes = raw[0::2]
+    odd_zero_ratio = odd_bytes.count(0) / max(len(odd_bytes), 1)
+    even_zero_ratio = even_bytes.count(0) / max(len(even_bytes), 1)
+    return odd_zero_ratio >= 0.8 or even_zero_ratio >= 0.8
+
+
+def detect_encoding(path: str | Path, sample_size: int = _PROBE_BYTES) -> str:
+    """确定性文本编码检测。
+
+    策略（按优先级）：
+    1. BOM 前置匹配
+    2. 排除非 UTF-16/32 的二进制样本（零值分布分析）
+    3. 按序尝试 9 种编码，解码成功且通过文本验证即返回
+    4. 样本末尾截断重试（变长编码末尾可能被截断）
+    5. chardet 统计模型兜底
+    6. Latin-1 无损 fallback
+    """
     p = Path(path)
-    sample_size = min(32 * 1024, p.stat().st_size)
+    file_size = p.stat().st_size
+    read_size = min(sample_size, file_size)
+    if read_size == 0:
+        return "utf-8"
+
     with p.open("rb") as f:
-        raw = f.read(sample_size)
+        raw = f.read(read_size)
 
-    if raw.startswith(b"\xef\xbb\xbf"):
-        return "utf-8-sig"
+    # 1) BOM 前置匹配
+    for bom, enc in _UTF_BOMS:
+        if raw.startswith(bom):
+            return enc
 
+    # 2) 是否像 UTF-16/32？不像则跳过这些编码尝试
+    #    utf-8-sig 已在 BOM 检测中处理，这里不再尝试
+    has_null = b"\x00" in raw
+    try_utf16_32 = has_null and _looks_like_utf16_or_32(raw)
+    encodings_to_try = tuple(
+        e for e in _TEXT_ENCODINGS
+        if e != "utf-8-sig"
+        and (try_utf16_32 or (not e.startswith(("utf-16", "utf-32"))))
+    )
+
+    # 3) 按序尝试编码
+    for enc in encodings_to_try:
+        try:
+            decoded = raw.decode(enc)
+            if _looks_like_text(decoded):
+                return enc
+        except UnicodeDecodeError as exc:
+            # 4) 末尾截断重试：变长编码样本末尾可能切到多字节中间
+            if exc.start >= len(raw) - 4 and exc.start > 0:
+                for trim in range(1, min(4, len(raw)) + 1):
+                    try:
+                        decoded = raw[:-trim].decode(enc)
+                        if _looks_like_text(decoded):
+                            return enc
+                    except UnicodeDecodeError:
+                        continue
+        except Exception:
+            continue
+
+    # 5) chardet 兜底
     if _has_chardet():
         import chardet
         result = chardet.detect(raw)
@@ -59,22 +151,11 @@ def detect_encoding(path: str | Path) -> str:
             if detected:
                 try:
                     raw.decode(detected)
-                    return detected
+                    return detected.lower()
                 except (UnicodeDecodeError, LookupError):
                     pass
 
-    try:
-        raw.decode("utf-8")
-        return "utf-8"
-    except UnicodeDecodeError:
-        pass
-
-    try:
-        raw.decode("gbk")
-        return "gbk"
-    except UnicodeDecodeError:
-        pass
-
+    # 6) Latin-1 无损 fallback
     return "latin-1"
 
 
