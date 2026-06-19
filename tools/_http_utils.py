@@ -48,6 +48,40 @@ def make_opener():
     return _SAFE_OPENER
 
 
+def _is_private_ip(host: str) -> str | None:
+    """判断 host 是否为内网/本地 IP。
+
+    先用 socket.inet_aton 标准化 IPv4 的各种写法（八进制、十六进制、短写法），
+    再用 ipaddress 判断是否属于私有网络。对 IPv6 字面量同样处理。
+    """
+    # 1) IPv4 任意进制 / 缩写标准化：0177.0.0.1 / 0x7f.0.0.1 / 127.1 等
+    try:
+        normalized = socket.inet_ntoa(socket.inet_aton(host))
+        ip = ipaddress.ip_address(normalized)
+        for net in _PRIVATE_NETS:
+            if ip in net:
+                return f"禁止访问内网地址: {host}"
+    except (OSError, ValueError):
+        pass
+
+    # 2) IPv6 字面量（含 IPv4-mapped）
+    try:
+        ip = ipaddress.ip_address(host)
+        for net in _PRIVATE_NETS:
+            if ip in net:
+                return f"禁止访问内网地址: {host}"
+        if isinstance(ip, ipaddress.IPv6Address):
+            ipv4 = ip.ipv4_mapped
+            if ipv4:
+                for net in _PRIVATE_NETS:
+                    if ipv4 in net:
+                        return f"禁止访问内网地址: {host}"
+    except ValueError:
+        pass
+
+    return None
+
+
 def validate_url(url: str) -> dict | None:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -58,33 +92,21 @@ def validate_url(url: str) -> dict | None:
     hostname = parsed.hostname
     if not hostname:
         return {"ok": False, "error": "URL 缺少有效主机名"}
-    try:
-        ip = ipaddress.ip_address(hostname)
-        for net in _PRIVATE_NETS:
-            if ip in net:
-                return {"ok": False, "error": f"禁止访问内网地址: {hostname}"}
-        # IPv4-mapped-IPv6: ::ffff:192.168.1.1 → 检查映射的 IPv4
-        ipv4 = ip.ipv4_mapped
-        if ipv4:
-            for net in _PRIVATE_NETS:
-                if ipv4 in net:
-                    return {"ok": False, "error": f"禁止访问内网地址: {hostname}"}
-    except (AttributeError, ValueError):
-        pass
+
+    err = _is_private_ip(hostname)
+    if err:
+        return {"ok": False, "error": err}
+
     try:
         addrs = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
         for addr in addrs:
             ip_str = addr[4][0]
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                for net in _PRIVATE_NETS:
-                    if ip in net:
-                        return {
-                            "ok": False,
-                            "error": f"禁止访问内网地址: {hostname} 解析到 {ip_str}",
-                        }
-            except ValueError:
-                pass
+            err2 = _is_private_ip(ip_str)
+            if err2:
+                return {
+                    "ok": False,
+                    "error": f"{hostname} 解析到内网地址 {ip_str}",
+                }
     except socket.gaierror:
         pass
     return None

@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from .shell_exec import split_command, validate_command
+from .shell_exec import split_command, validate_command, validate_command_args
 
 _PYTEST_SUMMARY_RE = re.compile(
     r"(?:(?P<failed>\d+)\s+failed)?(?:,\s*)?"
@@ -294,6 +294,9 @@ def run(
         valid = validate_command(args, allow_high_risk=False)
         if not valid.get("ok"):
             return valid
+        path_check = validate_command_args(args, root)
+        if path_check:
+            return path_check
         exe = Path(args[0]).name.lower().removesuffix(".exe")
         framework = {"python": "pytest", "py": "pytest", "pytest": "pytest", "go": "go", "cargo": "cargo", "npx": "jest", "npm": "npm"}.get(exe, framework)
 

@@ -525,7 +525,7 @@ def _read_directory(
             try:
                 children, child_total, _ = _read_directory(
                     item,
-                    recursive=False,
+                    recursive=True,
                     max_entries=10,
                     include_hidden=include_hidden,
                     max_depth=max_depth,

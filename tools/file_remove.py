@@ -56,11 +56,14 @@ def remove(path: str, confirm: bool = False, max_items: int = 50) -> dict:
                 error="目录删除需二次确认",
                 options=["confirm_delete", "cancel"])
 
-        # 单次遍历：计数 + 累加大小
+        # 单次遍历：计数 + 累加大小（不跟随 symlink）
         file_count = 0
         total_size = 0
-        for f in p.rglob("*"):
-            if f.is_file():
+        for root, dirs, files in os.walk(p, followlinks=False):
+            for name in files:
+                f = Path(root) / name
+                if f.is_symlink():
+                    continue  # symlink 不占真实文件计数
                 file_count += 1
                 try:
                     total_size += f.stat().st_size
@@ -74,19 +77,24 @@ def remove(path: str, confirm: bool = False, max_items: int = 50) -> dict:
                 options=["confirm_batch_delete", "cancel"])
 
         errors = []
+        deleted_count = 0
 
         try:
-            for root, dirs, files in os.walk(p, topdown=False):
+            for root, dirs, files in os.walk(p, topdown=False, followlinks=False):
                 for name in files:
                     fp = os.path.join(root, name)
                     try:
-                        os.remove(fp)
+                        os.unlink(fp)
+                        deleted_count += 1
                     except OSError as e:
                         errors.append({"path": fp, "reason": str(e)})
                 for name in dirs:
                     dp = os.path.join(root, name)
                     try:
-                        os.rmdir(dp)
+                        if os.path.islink(dp):
+                            os.unlink(dp)
+                        else:
+                            os.rmdir(dp)
                     except OSError as e:
                         errors.append({"path": dp, "reason": str(e)})
             try:
@@ -96,7 +104,7 @@ def remove(path: str, confirm: bool = False, max_items: int = 50) -> dict:
 
             return {
                 "ok": True,
-                "deleted": file_count - len(errors),
+                "deleted": deleted_count,
                 "freed": human_size(total_size),
                 "errors": errors[:10],
             }
