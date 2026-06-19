@@ -20,6 +20,7 @@ _SNAP_LOCK = threading.Lock()
 
 def snapshot() -> dict:
     """获取系统整体状态快照。"""
+    global _SNAP_CACHE, _SNAP_CACHE_TIME
     with _SNAP_LOCK:
         if _SNAP_CACHE is not None:
             if (time.time() - _SNAP_CACHE_TIME) < _SNAP_CACHE_TTL:
