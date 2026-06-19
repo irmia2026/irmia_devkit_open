@@ -21,7 +21,7 @@ def compress(files_or_dir: list[str], output: str) -> dict:
                 if p.is_dir():
                     for f in p.rglob("*"):
                         if f.is_file() and not guard.is_seen(str(f)):
-                            zf.write(f, f.relative_to(p))
+                            zf.write(f, f.relative_to(p).as_posix())
                 elif p.is_file():
                     zf.write(p, p.name)
                 else:

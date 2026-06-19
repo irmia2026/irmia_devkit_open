@@ -13,14 +13,34 @@ from typing import Any
 from ._http_utils import check_url, make_opener
 
 
+_MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5MB：超过此大小截断
+_MAX_RESPONSE_BODY = 5000  # 返回给 LLM 的最大字符数
+
+
+def _read_limited(resp, max_bytes: int = _MAX_RESPONSE_SIZE) -> str:
+    """分块读取响应体，超过 max_bytes 时截断。"""
+    chunks = []
+    total = 0
+    while True:
+        chunk = resp.read(8192)
+        if not chunk:
+            break
+        total += len(chunk)
+        chunks.append(chunk)
+        if total >= max_bytes:
+            break
+    body = b"".join(chunks).decode("utf-8", errors="replace")
+    return body, total > max_bytes
+
+
 def _build_response(resp) -> dict:
-    body = resp.read().decode("utf-8", errors="replace")
+    body, was_truncated = _read_limited(resp)
     return {
         "ok": True,
         "status": resp.status,
         "size": len(body),
-        "body": body[:5000],
-        "truncated": len(body) > 5000,
+        "body": body[:_MAX_RESPONSE_BODY],
+        "truncated": was_truncated or len(body) > _MAX_RESPONSE_BODY,
     }
 
 
