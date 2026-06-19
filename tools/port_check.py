@@ -4,7 +4,7 @@ port_check — 端口检测。
 """
 
 import socket
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 
@@ -35,9 +35,15 @@ def check(host: str = "127.0.0.1", port: int = 7860) -> dict:
 def scan(ports: list[int], host: str = "127.0.0.1") -> dict:
     """批量检测多个端口。返回每个端口的监听状态。"""
     results = []
-    for port in ports:
-        r = check(host, port)
-        results.append({"port": port, "listening": r["listening"]})
+    with ThreadPoolExecutor(max_workers=max(1, min(32, len(ports)))) as executor:
+        future_to_port = {executor.submit(check, host, port): port for port in ports}
+        for future in as_completed(future_to_port):
+            port = future_to_port[future]
+            try:
+                r = future.result()
+                results.append({"port": port, "listening": r["listening"]})
+            except Exception:
+                results.append({"port": port, "listening": False})
 
     return {
         "ok": True,

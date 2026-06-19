@@ -46,9 +46,12 @@ def _check_python(p: Path) -> dict:
         source = p.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         try:
-            source = p.read_text(encoding="gbk")
-        except Exception:
-            source = p.read_text(encoding="utf-8", errors="replace")
+            source = p.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                source = p.read_text(encoding="latin-1")
+            except Exception:
+                source = p.read_text(encoding="utf-8", errors="replace")
 
     try:
         ast.parse(source)

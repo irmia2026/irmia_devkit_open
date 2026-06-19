@@ -77,7 +77,10 @@ def _posix_search(
     fd_path = shutil.which("fd")
     if fd_path:
         try:
-            args = [fd_path, "--max-results", str(max_results), "--type", "f" if file_type == "file" else ("d" if file_type == "folder" else "f")]
+            type_arg = "f" if file_type == "file" else ("d" if file_type == "folder" else None)
+            args = [fd_path, "--max-results", str(max_results)]
+            if type_arg:
+                args.extend(["--type", type_arg])
             if ext:
                 args.extend(["-e", ext])
             if case_sensitive:

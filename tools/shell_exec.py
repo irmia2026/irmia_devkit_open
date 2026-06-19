@@ -218,6 +218,18 @@ def run(
         "CARGO_HOME": os.environ.get("CARGO_HOME", ""),
         "GOPATH": os.environ.get("GOPATH", ""),
         "NODE_PATH": os.environ.get("NODE_PATH", ""),
+        # Linux/macOS locale / venv / conda / nvm / timezone
+        "LANG": os.environ.get("LANG", ""),
+        "LC_ALL": os.environ.get("LC_ALL", ""),
+        "LC_CTYPE": os.environ.get("LC_CTYPE", ""),
+        "VIRTUAL_ENV": os.environ.get("VIRTUAL_ENV", ""),
+        "CONDA_PREFIX": os.environ.get("CONDA_PREFIX", ""),
+        "NVM_DIR": os.environ.get("NVM_DIR", ""),
+        "PYENV_ROOT": os.environ.get("PYENV_ROOT", ""),
+        "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH", ""),
+        "DYLD_LIBRARY_PATH": os.environ.get("DYLD_LIBRARY_PATH", ""),
+        "TZ": os.environ.get("TZ", ""),
+        "TERM": os.environ.get("TERM", ""),
         "COLUMNS": "999",
     }
     start = time.monotonic()

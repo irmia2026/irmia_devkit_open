@@ -5,6 +5,7 @@ db_query — SQLite 只读查询。
 
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote
 
 from ._helpers import proposal_reply
 
@@ -27,7 +28,7 @@ def query(db_path: str, sql: str, params: list = None) -> dict:
 
     params = params or []
     try:
-        uri_path = str(p.resolve()).replace("\\", "/")
+        uri_path = quote(str(p.resolve()).replace("\\", "/"), safe="/:")
         with sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(sql, params)

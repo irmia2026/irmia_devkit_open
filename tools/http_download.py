@@ -6,12 +6,21 @@ http_download — 二进制文件下载。
 import urllib.request
 import urllib.error
 import time
+import tempfile
 from pathlib import Path
 
 from ._http_utils import check_url, make_opener
 from ._file_utils import human_size
 
-_DOWNLOAD_SANDBOX = Path.home() / ".irmia" / "downloads"
+def _resolve_sandbox() -> Path:
+    """返回下载沙箱路径，HOME 不可用时回退到插件目录或临时目录。"""
+    try:
+        return Path.home() / ".irmia" / "downloads"
+    except RuntimeError:
+        return Path(tempfile.gettempdir()) / ".irmia" / "downloads"
+
+
+_DOWNLOAD_SANDBOX = _resolve_sandbox()
 _MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # H5: 500MB 上限
 
 

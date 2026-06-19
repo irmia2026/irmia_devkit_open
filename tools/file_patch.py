@@ -44,7 +44,7 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
             count = content.count(aligned_old)
             new_content = content.replace(aligned_old, aligned_new) if replace_all else content.replace(aligned_old, aligned_new, 1)
             actual_replaced = 1 if not replace_all else count
-            p.write_text(new_content, encoding=encoding)
+            p.write_text(new_content, encoding=encoding, newline="")
             return {
                 "ok": True,
                 "replaced": actual_replaced,
@@ -69,7 +69,7 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
     )
     actual_replaced = 1 if not replace_all else count
 
-    p.write_text(new_content, encoding=encoding)
+    p.write_text(new_content, encoding=encoding, newline="")
 
     result = {
         "ok": True,

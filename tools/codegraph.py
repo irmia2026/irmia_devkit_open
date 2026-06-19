@@ -252,19 +252,27 @@ class CodeGraph:
         total_files = len(all_files)
         changed_count = len(changed_files)
 
-        # ── Single-threaded parsing + batch write ──
+        # ── Parallel parsing + single-threaded batch write ──
         if changed_count > 0:
             worker_args = [(str(f), f.suffix.lower(), str(root)) for f in changed_files]
-            
-            # Single-threaded parsing is faster for typical projects (<1000 files)
-            results = []
-            for args in worker_args:
+
+            results: list = []
+            if len(worker_args) == 1:
+                # 单文件避免线程池开销
                 try:
-                    results.append(_extract_file_worker(args))
+                    results.append(_extract_file_worker(worker_args[0]))
                 except Exception:
                     stats["skipped"] += 1
-            
-            # Batch write
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                    futures = {executor.submit(_extract_file_worker, args): args for args in worker_args}
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            results.append(future.result())
+                        except Exception:
+                            stats["skipped"] += 1
+
+            # Batch write (SQLite 写入仍单线程以避免锁竞争)
             for rp, suffix, mtime_val, symbols, edges in results:
                 if incremental:
                     conn.execute("DELETE FROM symbols WHERE file=?", (rp,))

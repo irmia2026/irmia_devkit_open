@@ -42,10 +42,17 @@ def _run_gh(args: list[str], cwd: str = None, timeout: int = 20) -> dict:
         if gh_bin != "gh":
             result["error"] = f"gh 未找到: {gh_bin}"
     if not result["ok"] and gh_bin == "gh":
+        import sys
+        if sys.platform == "win32":
+            install_hint = "安装 GitHub CLI: winget install GitHub.cli"
+        elif sys.platform == "darwin":
+            install_hint = "安装 GitHub CLI: brew install gh"
+        else:
+            install_hint = "安装 GitHub CLI: apt install gh 或 dnf install gh"
         result["error"] = (
             f"{result.get('error', 'gh 未找到')}。"
-            "如已安装 gh CLI，用 es_search('gh.exe') 找到路径后填入 config.json 的 gh_path；"
-            "或安装 GitHub CLI: winget install GitHub.cli"
+            f"如已安装 gh CLI，用 rg_search('gh') 找到路径后填入 config.json 的 gh_path；"
+            f"或 {install_hint}"
         )
     return result
 

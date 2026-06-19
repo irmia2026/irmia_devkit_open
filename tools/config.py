@@ -14,7 +14,11 @@ def set_config(cfg: dict, plugin_dir: str = "") -> None:
     if plugin_dir:
         _plugin_dir = Path(plugin_dir)
     # 保证默认值
-    _config.setdefault("backup_dir", str(Path.home() / ".irmia" / "backups"))
+    try:
+        default_backup_dir = str(Path.home() / ".irmia" / "backups")
+    except RuntimeError:
+        default_backup_dir = str(Path(plugin_dir) / ".irmia" / "backups") if plugin_dir else str(Path.cwd() / ".irmia" / "backups")
+    _config.setdefault("backup_dir", default_backup_dir)
     _config.setdefault("gh_path", "")
     _config.setdefault("es_path", "")
     _config.setdefault("op_log_db", "")

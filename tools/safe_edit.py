@@ -24,7 +24,7 @@ def _backup_dir() -> Path:
     try:
         default.parent.mkdir(parents=True, exist_ok=True)
         return default
-    except OSError:
+    except (OSError, RuntimeError):
         root = get_plugin_dir() or Path(tempfile.gettempdir())
         return Path(root) / ".irmia" / "backups"
 
