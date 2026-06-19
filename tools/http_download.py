@@ -12,8 +12,7 @@ from ._http_utils import check_url, make_opener
 from ._file_utils import human_size
 
 _DOWNLOAD_SANDBOX = Path.home() / ".irmia" / "downloads"
-_MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # 500MB 上限
-_CHUNK_SIZE = 64 * 1024  # 64KB 块，减少 I/O 次数
+_MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # H5: 500MB 上限
 
 
 def _resolve_path(path: str) -> Path:
@@ -66,7 +65,7 @@ def download(url: str, path: str, overwrite: bool = False, timeout: int = 60) ->
             downloaded = 0
             with open(safe_path, "wb") as f:
                 while True:
-                    chunk = resp.read(_CHUNK_SIZE)
+                    chunk = resp.read(8192)
                     if not chunk:
                         break
                     if downloaded + len(chunk) > _MAX_DOWNLOAD_SIZE:

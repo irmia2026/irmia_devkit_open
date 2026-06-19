@@ -5,27 +5,13 @@ CPU/内存/进程数/开机时长。Windows: systeminfo+tasklist | Linux: /proc�
 
 import os
 import platform
-import time
-import threading
 from datetime import datetime, timedelta
 
 from ._helpers import _run_cmd
 
-# 缓存：系统快照（30秒TTL），锁保护并发访问
-_SNAP_CACHE = None
-_SNAP_CACHE_TIME = 0
-_SNAP_CACHE_TTL = 30.0
-_SNAP_LOCK = threading.Lock()
-
 
 def snapshot() -> dict:
     """获取系统整体状态快照。"""
-    global _SNAP_CACHE, _SNAP_CACHE_TIME
-    with _SNAP_LOCK:
-        if _SNAP_CACHE is not None:
-            if (time.time() - _SNAP_CACHE_TIME) < _SNAP_CACHE_TTL:
-                return _SNAP_CACHE
-    
     info = {
         "hostname": platform.node(),
         "platform": platform.platform(),
@@ -45,42 +31,33 @@ def snapshot() -> dict:
         info["available_memory_mb"] = None
         info["process_count"] = None
         info["_note"] = "macOS 不支持完整系统快照，欢迎提交 PR"
+        info["_note"] = "macOS 不支持完整系统快照，欢迎提交 PR"
     else:
         _linux_info(info)
 
-    result = {"ok": True, "info": info}
-    with _SNAP_LOCK:
-        _SNAP_CACHE = result
-        _SNAP_CACHE_TIME = time.time()
-    return result
+    return {"ok": True, "info": info}
 
 
 def _windows_info(info: dict) -> None:
-    # 并行化：同时启动 systeminfo 和 tasklist
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        sys_future = pool.submit(_run_cmd, ["systeminfo"], timeout=15, encoding="gbk")
-        proc_future = pool.submit(_run_cmd, ["tasklist", "/FO", "CSV", "/NH"], timeout=10, encoding="gbk")
-        
-        result = sys_future.result()
-        if result["ok"]:
-            for line in result["stdout"].split("\n"):
-                line = line.strip()
-                if "物理内存总量" in line or "Total Physical Memory" in line:
-                    info["total_memory_mb"] = _extract_mb(line)
-                if "可用的物理内存" in line or "Available Physical Memory" in line:
-                    info["available_memory_mb"] = _extract_mb(line)
-                if "系统启动时间" in line or "System Boot Time" in line:
-                    info["boot_time"] = line.split(":", 1)[-1].strip()
-        else:
-            info["total_memory_mb"] = None
-            info["available_memory_mb"] = None
+    result = _run_cmd(["systeminfo"], timeout=15, encoding="gbk")
+    if result["ok"]:
+        for line in result["stdout"].split("\n"):
+            line = line.strip()
+            if "物理内存总量" in line or "Total Physical Memory" in line:
+                info["total_memory_mb"] = _extract_mb(line)
+            if "可用的物理内存" in line or "Available Physical Memory" in line:
+                info["available_memory_mb"] = _extract_mb(line)
+            if "系统启动时间" in line or "System Boot Time" in line:
+                info["boot_time"] = line.split(":", 1)[-1].strip()
+    else:
+        info["total_memory_mb"] = None
+        info["available_memory_mb"] = None
 
-        result = proc_future.result()
-        if result["ok"]:
-            info["process_count"] = len([l for l in result["stdout"].split("\n") if l.strip()])
-        else:
-            info["process_count"] = None
+    result = _run_cmd(["tasklist", "/FO", "CSV", "/NH"], timeout=10, encoding="gbk")
+    if result["ok"]:
+        info["process_count"] = len([l for l in result["stdout"].split("\n") if l.strip()])
+    else:
+        info["process_count"] = None
 
 
 def _linux_info(info: dict) -> None:

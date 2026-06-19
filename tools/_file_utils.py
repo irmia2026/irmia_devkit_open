@@ -12,174 +12,32 @@ SAFE_EDIT_MAX_SIZE = 20 * 1024 * 1024
 FILE_DIFF_MAX_SIZE = 50 * 1024 * 1024
 
 
-# 扩展名黑名单（二进制）
-_BINARY_EXTENSIONS = frozenset({
-    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ico',
-    '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv',
-    '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar',
-    '.exe', '.dll', '.so', '.dylib', '.bin', '.dat',
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-    '.db', '.sqlite', '.sqlite3',
-})
-
-# 文本文件扩展名白名单（即使内容像二进制也强制按文本）
-_TEXT_EXTENSIONS = frozenset({
-    '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.c', '.cpp', '.h', '.hpp',
-    '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.clj',
-    '.html', '.htm', '.css', '.scss', '.less', '.xml', '.json', '.yaml', '.yml',
-    '.md', '.txt', '.rst', '.log', '.ini', '.cfg', '.conf', '.sh', '.bash', '.zsh',
-    '.sql', '.vim', '.emacs', '.el', '.lisp', '.scm', '.rkt',
-    '.nim', '.nims', '.nimble', '.svg',
-})
-
-
-def _has_chardet() -> bool:
-    """检查是否安装了 chardet。"""
-    try:
-        import chardet
-        return True
-    except ImportError:
-        return False
-
-
-def detect_encoding(path: str | Path) -> str:
-    """检测文件编码。
-    
-    优先级：
-    1. chardet（如果安装）
-    2. UTF-8 BOM 检测
-    3. UTF-8 尝试
-    4. GBK 尝试（中文环境）
-    5. Latin-1 无损 fallback（保证不抛异常）
-    """
+def _detect_encoding(path: str | Path) -> str:
+    """检测文件编码：优先 UTF-8，失败回退 GBK。"""
     p = Path(path)
-    
-    # 读取样本（前 32KB）
-    sample_size = min(32 * 1024, p.stat().st_size)
-    with p.open('rb') as f:
-        raw = f.read(sample_size)
-    
-    # UTF-8 BOM 检测
-    if raw.startswith(b'\xef\xbb\xbf'):
-        return 'utf-8-sig'
-    
-    # chardet 检测
-    if _has_chardet():
-        import chardet
-        result = chardet.detect(raw)
-        if result and result['confidence'] > 0.7:
-            detected = result['encoding']
-            if detected:
-                try:
-                    raw.decode(detected)
-                    return detected
-                except (UnicodeDecodeError, LookupError):
-                    pass
-    
-    # UTF-8 尝试
     try:
-        raw.decode('utf-8')
-        return 'utf-8'
+        p.read_text(encoding="utf-8")
+        return "utf-8"
     except UnicodeDecodeError:
-        pass
-    
-    # GBK 尝试（中文环境）
+        return "gbk"
+
+
+def read_file(path: str | Path) -> str:
+    """读取文件内容。先试 UTF-8，失败回退 GBK。"""
+    p = Path(path)
     try:
-        raw.decode('gbk')
-        return 'gbk'
+        return p.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        pass
-    
-    # Latin-1 无损 fallback
-    return 'latin-1'
+        return p.read_text(encoding="gbk")
 
 
-def is_binary_file(path: str | Path, sample_size: int = 8192) -> tuple[bool, str]:
-    """检测文件是否为二进制文件。
-    
-    返回：(is_binary, reason)
-    reason: 'extension' | 'content' | 'text_extension' | 'unknown'
-    """
+def read_file_with_encoding(path: str | Path) -> tuple[str, str]:
+    """读取文件内容，同时返回检测到的编码。"""
     p = Path(path)
-    ext = p.suffix.lower()
-    
-    if ext in _BINARY_EXTENSIONS:
-        return True, 'extension'
-    
-    if ext in _TEXT_EXTENSIONS:
-        return False, 'text_extension'
-    
-    file_size = p.stat().st_size
-    if file_size == 0:
-        return False, 'unknown'
-    
-    read_size = min(sample_size, file_size)
-    with p.open('rb') as f:
-        chunk = f.read(read_size)
-    
-    null_count = chunk.count(b'\x00')
-    if null_count > 0 and len(chunk) > 0:
-        null_ratio = null_count / len(chunk)
-        if null_ratio > 0.3:
-            return True, 'content'
-    
-    control_chars = sum(1 for b in chunk if b < 32 and b not in (9, 10, 13))
-    if len(chunk) > 0:
-        control_ratio = control_chars / len(chunk)
-        if control_ratio > 0.1:
-            return True, 'content'
-    
-    return False, 'unknown'
-
-
-def _check_path_safety(path: str | Path, *, read: bool = True) -> dict | None:
-    """统一路径沙箱校验：拒绝 .. 穿越和系统目录访问。
-
-    复用 file_remove 的 _FORBIDDEN_PREFIXES。
-    返回 None 表示安全；否则返回错误 dict。
-    """
-    raw = str(path).replace("\\", "/")
-    if ".." in raw.split("/"):
-        return {"ok": False, "error": "路径包含 .. 穿越，已被拒绝"}
-
-    p = Path(path).resolve()
-    path_str = str(p).replace("\\", "/")
-    from .file_remove import _FORBIDDEN_PREFIXES
-
-    for forbidden in _FORBIDDEN_PREFIXES:
-        if path_str.lower().startswith(forbidden.lower() + "/") or path_str.lower() == forbidden.lower():
-            return {
-                "ok": False,
-                "error": f"禁止访问系统目录: {p}",
-                "proposal": "路径位于受保护的系统目录中，读取操作已被拦截。",
-                "evidence": {"path": str(p), "blocked_by": forbidden},
-            }
-    return None
-
-
-def check_path_allowed(path: str | Path) -> dict | None:
-    """safe_read 专用入口：检查路径是否允许访问。"""
-    return _check_path_safety(path, read=True)
-
-
-def read_file(path: str | Path, *, encoding: str = "auto") -> str:
-    """读取文件内容。编码 auto 时自动检测，否则使用指定编码。"""
-    p = Path(path)
-    enc = detect_encoding(p) if encoding == "auto" else encoding
-    return p.read_text(encoding=enc, errors="replace")
-
-
-def read_file_with_encoding(path: str | Path, *, encoding: str = "auto", max_bytes: int | None = None) -> tuple[str, str]:
-    """读取文件内容，同时返回检测到的编码。
-
-    max_bytes: 最大读取字节数，用于大文件预览场景；None 表示不限制。
-    """
-    p = Path(path)
-    enc = detect_encoding(p) if encoding == "auto" else encoding
-    if max_bytes is None:
-        return p.read_text(encoding=enc, errors="replace"), enc
-    with p.open("r", encoding=enc, errors="replace") as f:
-        return f.read(max_bytes), enc
+    try:
+        return p.read_text(encoding="utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        return p.read_text(encoding="gbk"), "gbk"
 
 
 def human_size(n: int) -> str:

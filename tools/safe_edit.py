@@ -14,10 +14,6 @@ from .syntax_check import check as syntax_check
 from ._file_utils import read_file_with_encoding, find_closest_line, SAFE_EDIT_MAX_SIZE, align_whitespace
 
 
-# 预编译的代码后缀集合——避免每次调用重新构建tuple
-_CODE_SUFFIXES = frozenset((".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx"))
-
-
 def _backup_dir() -> Path:
     """读取配置的备份目录，未配置则使用默认值。"""
     config = get_config()
@@ -187,7 +183,7 @@ def edit(
 
     # 3. 语法检查（只对代码文件）
     suffix = p.suffix.lower()
-    if suffix in _CODE_SUFFIXES:
+    if suffix in (".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx"):
         check_result = syntax_check(filepath)
         result["syntax_check"] = check_result
 

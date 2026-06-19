@@ -25,11 +25,11 @@ _DEFAULT_CONFIG = {
     "allowed_ids": "",
     "group_config_enabled": False,
     "tool_groups": {g: True for g in TOOL_GROUPS},
+    "enable_all_tools": False,
+    "disable_all_tools": False,
     "disabled_tools": [],
     "es_path": "",
     "gh_path": "",
-    "state_dir": "",
-    "lock_dirs": [],
     "backup_dir": "",
 }
 
@@ -81,7 +81,7 @@ class Main(star.Star):
         # AstrBot WebUI 配置优先于 config.json
         if config:
             sectioned = {}
-            for section_name in ("权限管理", "工具权限", "外部路径", "兼容保留"):
+            for section_name in ("权限管理", "工具权限", "外部路径"):
                 value = config.get(section_name, {})
                 if isinstance(value, dict):
                     sectioned.update(value)
@@ -107,18 +107,28 @@ class Main(star.Star):
                 if value:
                     _config[key] = value
                     changed = True
-            lock_dirs_value = paths.get("lock_dirs") or web_config.get("lock_dirs", "")
-            if lock_dirs_value:
-                _config["lock_dirs"] = [d.strip() for d in str(lock_dirs_value).split(",") if d.strip()]
-                changed = True
             web_groups = web_config.get("tool_groups", {})
             if web_groups and isinstance(web_groups, dict):
                 stored = _config.setdefault("tool_groups", {})
                 for g, v in web_groups.items():
                     stored[g] = v
                 changed = True
+            enable_all_tools = bool(web_config.get("enable_all_tools", False))
+            disable_all_tools = bool(web_config.get("disable_all_tools", False))
+            if enable_all_tools:
+                _config["tool_groups"] = {g: True for g in TOOL_GROUPS}
+                _config["disabled_tools"] = []
+                _config["enable_all_tools"] = True
+                _config["disable_all_tools"] = False
+                changed = True
+            elif disable_all_tools:
+                _config["tool_groups"] = {g: False for g in TOOL_GROUPS}
+                _config["disabled_tools"] = sorted(_ALL_TOOLS.keys())
+                _config["enable_all_tools"] = False
+                _config["disable_all_tools"] = True
+                changed = True
             web_disabled = web_config.get("disabled_tools", "")
-            if web_disabled:
+            if web_disabled and not (enable_all_tools or disable_all_tools):
                 if isinstance(web_disabled, str):
                     _config["disabled_tools"] = [t.strip() for t in web_disabled.replace("，", ",").split(",") if t.strip()]
                 elif isinstance(web_disabled, list):
@@ -138,6 +148,7 @@ class Main(star.Star):
         allowed_ids = build_allowed_ids(context, _config)
         self._allowed_ids_cache = allowed_ids
 
+        self._config_path = config_path
         self._group_config_enabled = bool(_config.get("group_config_enabled", False))
         self._group_configs_path = os.path.join(str(data_dir), "group_configs.json")
         self._group_configs_cache = self._load_group_configs() if self._group_config_enabled else {}
@@ -216,6 +227,20 @@ class Main(star.Star):
             return ""
 
     @staticmethod
+    def _event_config_id(event: AstrMessageEvent) -> str:
+        try:
+            group_id = str(event.get_group_id() or "").strip()
+            if group_id:
+                return group_id
+        except Exception:
+            pass
+        try:
+            sender_id = str(event.get_sender_id() or "").strip()
+            return f"private:{sender_id}" if sender_id else ""
+        except Exception:
+            return ""
+
+    @staticmethod
     def _parse_ids(raw) -> set[str]:
         if isinstance(raw, str):
             return {x.strip() for x in raw.replace("，", ",").split(",") if x.strip()}
@@ -227,7 +252,7 @@ class Main(star.Star):
         if not self._group_config_enabled:
             return {}
         configs = self._group_configs_cache if isinstance(self._group_configs_cache, dict) else {}
-        group_id = self._event_group_id(event)
+        group_id = self._event_config_id(event)
         default_cfg = configs.get("__default__", {})
         group_cfg = configs.get(group_id, {}) if group_id else {}
         if not isinstance(default_cfg, dict):
@@ -282,10 +307,11 @@ class Main(star.Star):
         return True
 
     def _is_tool_allowed_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
-        if event.is_admin():
-            return True
+        # 分群工具开关对管理员也生效；管理员只绕过身份权限，不绕过工具禁用。
         if not self._is_tool_group_enabled_for_event(event, tool_name):
             return False
+        if event.is_admin():
+            return True
         return str(event.get_sender_id() or "").strip() in self._allowed_ids or self._is_group_extra_admin(event)
 
     def _heal_inactivated_tools(self, tools: list) -> None:
@@ -383,17 +409,3 @@ class Main(star.Star):
     @property
     def _allowed_ids(self) -> set:
         return self._allowed_ids_cache
-
-    async def terminate(self) -> None:
-        """插件卸载/热重载时清理资源：刷盘审计日志、关闭 run_sync 线程池。"""
-        try:
-            from .tools import op_log as _op_log
-            _op_log.shutdown()
-        except Exception:
-            pass
-        try:
-            from .tools._helpers import shutdown_run_sync
-            shutdown_run_sync()
-        except Exception:
-            pass
-        logger.info("devkit terminated")

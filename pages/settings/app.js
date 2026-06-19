@@ -12,9 +12,13 @@ let appearanceMode = "auto";
 let api = null;
 let toolGroupsDef = {};
 let groupsData = [];
-let selectedGroupId = null;
+let contactsData = [];
+let selectedGroupId = "";
 let currentConfig = null;
 let globalAdminIds = [];
+let pathOptions = { es_path: "", gh_path: "", backup_dir: "" };
+const collapsedMenus = { groups: true, contacts: true };
+const DEFAULT_GROUP = { id: "__default__", name: "全局设置", avatar: "", updated_at: Number.MAX_SAFE_INTEGER, isDefault: true, kind: "global" };
 
 const GROUP_EMOJIS = [
   [/(文件系统|文件|file|zip|目录|dir|path|download|hash)/i, "📁"],
@@ -168,13 +172,14 @@ async function init() {
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
   document.getElementById("appearanceToggleBtn")?.addEventListener("click", cycleAppearanceMode);
   document.getElementById("refreshGroupsBtn")?.addEventListener("click", async () => {
-    await loadGroups();
-    showToast("群聊列表已刷新");
+    await loadContacts();
+    showToast("群聊/私聊列表已刷新");
   });
   await loadUiPreferences();
   await loadToolGroups();
   await loadGlobalAdmins();
-  await loadGroups();
+  await loadPathOptions();
+  await loadContacts();
 }
 
 async function loadToolGroups() {
@@ -194,45 +199,103 @@ async function loadGlobalAdmins() {
   } catch (e) { console.error("loadGlobalAdmins", e); }
 }
 
-async function loadGroups() {
+async function loadPathOptions() {
   try {
-    const data = await api.safeGet("groups");
+    const data = await api.safeGet("path_options");
+    if (data.ok && data.paths) pathOptions = { ...pathOptions, ...data.paths };
+  } catch (e) { console.error("loadPathOptions", e); }
+}
+
+function pathValue(key) {
+  return escapeHtml(pathOptions?.[key] || "");
+}
+
+function renderPathOptionsPanel() {
+  return `<section class="card path-card">
+    <div class="path-head">
+      <div><h3>选填路径</h3><p>通常保持空值，让插件自动检测。</p></div>
+      <div class="path-actions">
+        <button class="btn btn-secondary compact" id="resetConfigBtn" type="button">重置当前会话</button>
+        <button class="btn btn-secondary compact" id="savePathOptionsBtn" type="button">保存选填项</button>
+        <button class="btn btn-primary compact" id="saveConfigBtn" type="button">保存配置</button>
+      </div>
+    </div>
+    <div class="path-grid">
+      <label><span>Everything CLI</span><input class="input-field path-input" data-path-key="es_path" value="${pathValue("es_path")}" placeholder="留空自动检测 es.exe"></label>
+      <label><span>GitHub CLI</span><input class="input-field path-input" data-path-key="gh_path" value="${pathValue("gh_path")}" placeholder="留空自动检测 gh.exe"></label>
+      <label><span>备份目录</span><input class="input-field path-input" data-path-key="backup_dir" value="${pathValue("backup_dir")}" placeholder="留空使用默认备份目录"></label>
+    </div>
+  </section>`;
+}
+
+async function savePathOptions() {
+  document.querySelectorAll(".path-input[data-path-key]").forEach(input => {
+    pathOptions[input.dataset.pathKey] = input.value.trim();
+  });
+  try {
+    const data = await api.safePost("path_options/save", pathOptions);
     if (data.ok) {
-      groupsData = data.groups || [];
-      renderGroupList();
+      pathOptions = { ...pathOptions, ...data.paths };
+      showToast("选填路径已保存");
+      return;
     }
-  } catch (e) { console.error("loadGroups", e); showToast("群聊加载失败"); }
+    showToast("选填路径保存失败");
+  } catch (e) { console.error("savePathOptions", e); showToast("选填路径保存请求失败"); }
+}
+
+async function loadContacts() {
+  try {
+    const [groups, contacts] = await Promise.all([api.safeGet("groups"), api.safeGet("contacts")]);
+    if (!groups.ok) throw new Error("groups failed");
+    const realGroups = Array.isArray(groups.groups) ? groups.groups.filter(g => g && g.id !== "__default__") : [];
+    groupsData = realGroups.map(g => ({ ...g, kind: "group" }));
+    contactsData = contacts.ok && Array.isArray(contacts.contacts) ? contacts.contacts.map(c => ({ ...c, kind: "private" })) : [];
+    renderGroupList();
+  } catch (e) { console.error("loadContacts", e); showToast("群聊/私聊加载失败"); }
+}
+
+function groupAvatarHtml(g) {
+  if (g.isDefault) return `<div class="group-avatar-placeholder default-avatar" aria-hidden="true"><span>默</span></div>`;
+  const text = g.kind === "private" ? "私" : "群";
+  if (g.avatar) return `<img class="group-avatar" src="${escapeHtml(g.avatar)}" onerror="this.outerHTML='<div class=group-avatar-placeholder>${text}</div>'">`;
+  return `<div class="group-avatar-placeholder">${text}</div>`;
+}
+
+function contactById(id) {
+  return id === "__default__" ? DEFAULT_GROUP : [...groupsData, ...contactsData].find(item => item.id === id);
+}
+
+function renderContactSection(key, title, items) {
+  const collapsed = collapsedMenus[key];
+  const body = collapsed ? "" : (items.length ? items.map(renderContactItem).join("") : `<div class="group-empty">暂无${title}</div>`);
+  return `<section class="contact-section ${collapsed ? "collapsed" : ""}">
+    <button class="contact-section-head" type="button" data-menu="${key}"><span>${title}</span><b>${items.length}</b></button>
+    <div class="contact-section-body">${body}</div>
+  </section>`;
+}
+
+function renderContactItem(g) {
+  return `<div class="group-item ${g.id === selectedGroupId ? "active" : ""}" data-id="${escapeHtml(g.id)}">
+    ${groupAvatarHtml(g)}
+    <div><div class="group-name">${escapeHtml(g.name)}</div><div class="group-id-tag">${g.isDefault ? "直接影响群聊和私聊配置" : escapeHtml(g.user_id || g.id)}</div></div>
+    <div class="group-chip">${g.isDefault ? "默认" : g.kind === "private" ? "私聊" : "群聊"}</div>
+  </div>`;
 }
 
 function renderGroupList() {
   const container = document.getElementById("groupList");
   if (!container) return;
-  container.innerHTML = "";
-  const countLabel = document.getElementById("groupCountLabel");
-  if (countLabel) countLabel.textContent = String(groupsData.length);
-
-  if (!groupsData.length) {
-    container.innerHTML = `<div class="group-item"><div class="group-avatar-placeholder">?</div><div><div class="group-name">暂无群聊</div><div class="group-id-tag">等待平台返回群列表</div></div></div>`;
-    return;
-  }
-
-  groupsData.forEach(g => {
-    const item = document.createElement("div");
-    item.className = "group-item" + (g.id === selectedGroupId ? " active" : "");
-    item.onclick = () => selectGroup(g.id);
-    const avatarHtml = g.avatar
-      ? `<img class="group-avatar" src="${escapeHtml(g.avatar)}" onerror="this.outerHTML='<div class=group-avatar-placeholder>群</div>'">`
-      : `<div class="group-avatar-placeholder">群</div>`;
-    item.innerHTML = `
-      ${avatarHtml}
-      <div>
-        <div class="group-name">${escapeHtml(g.name)}</div>
-        <div class="group-id-tag">${escapeHtml(g.id)}</div>
-      </div>
-      <div class="group-chip">配置</div>
-    `;
-    container.appendChild(item);
+  const groupCount = document.getElementById("groupCountLabel");
+  const privateCount = document.getElementById("privateCountLabel");
+  if (groupCount) groupCount.textContent = String(groupsData.length);
+  if (privateCount) privateCount.textContent = String(contactsData.length);
+  const globalHtml = `<section class="global-contact-card">${renderContactItem(DEFAULT_GROUP)}</section>`;
+  container.innerHTML = globalHtml + renderContactSection("groups", "群聊", groupsData) + renderContactSection("contacts", "私聊", contactsData);
+  container.querySelectorAll(".contact-section-head").forEach(btn => btn.onclick = () => {
+    collapsedMenus[btn.dataset.menu] = !collapsedMenus[btn.dataset.menu];
+    renderGroupList();
   });
+  container.querySelectorAll(".group-item[data-id]").forEach(item => item.onclick = () => selectGroup(item.dataset.id));
 }
 
 async function selectGroup(groupId) {
@@ -268,10 +331,17 @@ function getEnabledToolCount() {
 }
 
 function renderConfigPanel() {
+  if (!selectedGroupId || !currentConfig) {
+    document.getElementById("emptyState").style.display = "grid";
+    document.getElementById("configPanel").style.display = "none";
+    return;
+  }
   document.getElementById("emptyState").style.display = "none";
   const panel = document.getElementById("configPanel");
   panel.style.display = "block";
-  const groupName = groupsData.find(g => g.id === selectedGroupId)?.name || `群${selectedGroupId}`;
+  const contact = contactById(selectedGroupId);
+  const groupName = contact?.name || (selectedGroupId.startsWith("private:") ? `私聊${selectedGroupId.slice(8)}` : `群${selectedGroupId}`);
+  const groupHint = selectedGroupId === "__default__" ? "全局设置会直接影响所有未单独配置的群聊和私聊，保存后即刻生效。" : selectedGroupId.startsWith("private:") ? `私聊用户 ${escapeHtml(selectedGroupId.slice(8))}。这里控制工具箱在该私聊内的可用范围，保存后即刻生效。` : `群号 ${escapeHtml(selectedGroupId)}。这里控制工具箱在该群内的可用范围，保存后即刻生效。`;
   const allTools = allToolItems();
   const adminIdsStr = globalAdminIds.join("、") || "未配置";
   const enabledTools = getEnabledToolCount();
@@ -283,7 +353,7 @@ function renderConfigPanel() {
           <div>
             <div class="kicker">IRMIA DEVKIT</div>
             <h2>${escapeHtml(groupName)}</h2>
-            <p>群号 ${escapeHtml(selectedGroupId)}。这里控制工具箱在该群内的可用范围。</p>
+            <p>${groupHint}</p>
           </div>
           <div class="stat-grid">
             <div><b>${Object.keys(toolGroupsDef).length}</b><span>工具组</span></div>
@@ -301,7 +371,7 @@ function renderConfigPanel() {
           <div class="input-hint">全局管理员：${escapeHtml(adminIdsStr)}</div>
           <label class="field-label" for="extraAdminIds">额外管理员 QQ</label>
           <input class="input-field" id="extraAdminIds" type="text" value="${escapeHtml(currentConfig.extra_admin_ids)}" placeholder="例如：123456,987654">
-          <div class="input-hint">多个 QQ 用逗号分隔。仅影响当前群。</div>
+          <div class="input-hint">多个 QQ 用逗号分隔。仅影响当前会话。</div>
         </div>
       </div>
       <div class="card bulk-card">
@@ -317,13 +387,10 @@ function renderConfigPanel() {
       </div>
     </div>
 
+    ${renderPathOptionsPanel()}
+
     <div class="board">
       ${renderToolGroupCards()}
-    </div>
-
-    <div class="actions">
-      <button class="btn btn-secondary" id="resetConfigBtn" type="button">重置当前群</button>
-      <button class="btn btn-primary" id="saveConfigBtn" type="button">保存配置</button>
     </div>
   `;
 
@@ -332,42 +399,49 @@ function renderConfigPanel() {
 
 function renderToolGroupCards() {
   const disabled = new Set(currentConfig.disabled_tools || []);
-  return Object.entries(toolGroupsDef)
+  const columns = [[], []];
+  const heights = [0, 0];
+  Object.entries(toolGroupsDef)
     .map(([groupName, rawTools]) => [groupName, rawTools, asToolItems(rawTools).length])
     .sort((a, b) => b[2] - a[2] || String(a[0]).localeCompare(String(b[0]), "zh-Hans-CN"))
-    .map(([groupName, rawTools], index) => {
-    const tools = asToolItems(rawTools);
-    const groupChecked = currentConfig.tool_groups[groupName] !== false;
-    const rows = tools.map(tool => {
-      const checked = !disabled.has(tool.id);
-      return `
-        <label class="tool-card">
-          <div class="tool-emoji">${emojiForName(tool.name || tool.id)}</div>
-          <div class="tool-copy">
-            <div class="tool-name">${escapeHtml(tool.name)}</div>
-            <div class="tool-desc">${escapeHtml(tool.desc)}</div>
+    .forEach(([groupName, rawTools]) => {
+      const tools = asToolItems(rawTools);
+      const groupChecked = currentConfig.tool_groups[groupName] !== false;
+      const rows = tools.map(tool => {
+        const checked = !disabled.has(tool.id);
+        return `
+          <label class="tool-card">
+            <div class="tool-emoji">${emojiForName(tool.name || tool.id)}</div>
+            <div class="tool-copy">
+              <div class="tool-name">${escapeHtml(tool.name)}</div>
+              <div class="tool-desc">${escapeHtml(tool.desc)}</div>
+            </div>
+            <span class="switch">
+              <input class="tool-toggle" type="checkbox" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(groupName)}" ${checked ? "checked" : ""}>
+              <span class="switch-track"></span><span class="switch-thumb"></span>
+            </span>
+          </label>`;
+      }).join("");
+      const card = `
+        <section class="group-card">
+          <div class="group-head">
+            <div class="group-title">
+              <span class="group-icon"><span class="group-icon-symbol">${emojiForName(groupName)}</span></span>
+              <div><b>${escapeHtml(groupName)}</b><span>${tools.length} 个工具，可单独控制</span></div>
+            </div>
+            <label class="switch" title="工具组总开关">
+              <input class="group-toggle" type="checkbox" data-group="${escapeHtml(groupName)}" ${groupChecked ? "checked" : ""}>
+              <span class="switch-track"></span><span class="switch-thumb"></span>
+            </label>
           </div>
-          <span class="switch">
-            <input class="tool-toggle" type="checkbox" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(groupName)}" ${checked ? "checked" : ""}>
-            <span class="switch-track"></span><span class="switch-thumb"></span>
-          </span>
-        </label>`;
-    }).join("");
-    return `
-      <section class="group-card">
-        <div class="group-head">
-          <div class="group-title">
-            <span class="group-icon"><span class="group-icon-symbol">${emojiForName(groupName)}</span></span>
-            <div><b>${escapeHtml(groupName)}</b><span>${tools.length} 个工具，可单独控制</span></div>
-          </div>
-          <label class="switch" title="工具组总开关">
-            <input class="group-toggle" type="checkbox" data-group="${escapeHtml(groupName)}" ${groupChecked ? "checked" : ""}>
-            <span class="switch-track"></span><span class="switch-thumb"></span>
-          </label>
-        </div>
-        <div class="tool-grid">${rows || `<div class="tool-card"><div><div class="tool-name">空工具组</div><div class="tool-desc">注册表暂未提供工具</div></div></div>`}</div>
-      </section>`;
-  }).join("");
+          <div class="tool-grid">${rows || `<div class="tool-card"><div><div class="tool-name">空工具组</div><div class="tool-desc">注册表暂未提供工具</div></div></div>`}</div>
+        </section>`;
+      const estimatedHeight = 96 + Math.max(tools.length, 1) * 64;
+      const columnIndex = heights[0] <= heights[1] ? 0 : 1;
+      columns[columnIndex].push(card);
+      heights[columnIndex] += estimatedHeight;
+    });
+  return `<div class="board-column">${columns[0].join("")}</div><div class="board-column">${columns[1].join("")}</div>`;
 }
 
 function bindConfigEvents() {
@@ -402,6 +476,7 @@ function bindConfigEvents() {
   });
   document.getElementById("saveConfigBtn")?.addEventListener("click", saveConfig);
   document.getElementById("resetConfigBtn")?.addEventListener("click", resetConfig);
+  document.getElementById("savePathOptionsBtn")?.addEventListener("click", savePathOptions);
 }
 
 function setAllToolsState(enabled) {
@@ -440,13 +515,24 @@ function showConfirm(message, title = "确认操作") {
 }
 
 function touchCurrentGroup() {
+  if (!selectedGroupId) return;
   const now = Math.floor(Date.now() / 1000);
-  groupsData = groupsData.map(g => g.id === selectedGroupId ? { ...g, updated_at: now } : g);
-  groupsData.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+  const isPrivate = selectedGroupId.startsWith("private:");
+  const update = g => g.id === selectedGroupId ? { ...g, updated_at: now } : g;
+  if (isPrivate) contactsData = sortContacts(contactsData.map(update));
+  else groupsData = sortContacts(groupsData.map(update));
   renderGroupList();
 }
 
-async function persistConfig(message = "配置已保存") {
+function sortContacts(items, keepDefault = false) {
+  return [...items].sort((a, b) => {
+    if (keepDefault && a.id === "__default__") return -1;
+    if (keepDefault && b.id === "__default__") return 1;
+    return Number(b.updated_at || 0) - Number(a.updated_at || 0);
+  });
+}
+
+async function persistConfig(message = "配置已保存，已即刻生效") {
   currentConfig.extra_admin_ids = document.getElementById("extraAdminIds")?.value.trim() || currentConfig.extra_admin_ids || "";
   const payload = {
     group_id: selectedGroupId,
@@ -457,10 +543,13 @@ async function persistConfig(message = "配置已保存") {
   try {
     const data = await api.safePost("group_config/save", payload);
     if (data.ok) {
-      currentConfig = normalizeConfig(payload);
+      if (currentConfig && selectedGroupId) {
+        currentConfig = normalizeConfig(payload);
+        renderConfigPanel();
+      }
       showToast(message);
       touchCurrentGroup();
-      await loadGroups();
+      await loadContacts();
       return true;
     }
     showToast("保存失败");
@@ -469,12 +558,12 @@ async function persistConfig(message = "配置已保存") {
 }
 
 async function saveConfig() {
-  if (!(await showConfirm("保存当前群的工具箱权限配置？", "保存配置"))) return;
-  await persistConfig("配置已保存");
+  if (!(await showConfirm("保存当前工具箱权限配置？保存后立即在运行中生效。", "保存配置"))) return;
+  await persistConfig("配置已保存，已即刻生效");
 }
 
 async function resetConfig() {
-  if (!(await showConfirm("重置当前群配置？额外管理员会清空，所有工具会重新开启。", "重置配置"))) return;
+  if (!(await showConfirm("重置当前会话配置？额外管理员会清空，所有工具会重新开启。", "重置配置"))) return;
   const toolGroups = {};
   for (const groupName of Object.keys(toolGroupsDef)) toolGroups[groupName] = true;
   currentConfig = { group_id: selectedGroupId, extra_admin_ids: "", tool_groups: toolGroups, disabled_tools: [] };

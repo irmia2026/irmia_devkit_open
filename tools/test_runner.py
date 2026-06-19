@@ -11,7 +11,8 @@ import sys
 import time
 from pathlib import Path
 
-from .shell_exec import split_command, validate_command, validate_command_args
+from .shell_exec import split_command, validate_command
+
 
 _PYTEST_SUMMARY_RE = re.compile(
     r"(?:(?P<failed>\d+)\s+failed)?(?:,\s*)?"
@@ -21,31 +22,20 @@ _PYTEST_SUMMARY_RE = re.compile(
 )
 
 
-# 缓存：测试框架发现结果，基于项目路径和关键文件 mtime
-_TEST_DISCOVER_CACHE: dict[str, tuple[str, list[str], float]] = {}
-
-
-def _cache_key(project_dir: Path) -> str:
-    """基于项目路径和关键文件 mtime 生成缓存键。"""
-    key_parts = [str(project_dir)]
-    for marker in ["go.mod", "Cargo.toml", "package.json", "pyproject.toml", "setup.py", "requirements.txt"]:
-        f = project_dir / marker
-        if f.exists():
-            key_parts.append(f"{marker}:{f.stat().st_mtime}")
-    return "|".join(key_parts)
+def _resolve_project_dir(filepath: str = "", project_dir: str = ".") -> Path:
+    if filepath:
+        p = Path(filepath).resolve()
+        if p.exists():
+            return p.parent if p.is_file() else p
+    return Path(project_dir or ".").resolve()
 
 
 def discover(project_dir: Path) -> tuple[str, list[str]]:
-    cache_key = _cache_key(project_dir)
-    cached = _TEST_DISCOVER_CACHE.get(cache_key)
-    if cached is not None:
-        return cached[0], cached[1]
-    
     if (project_dir / "go.mod").exists():
-        result = ("go", ["go", "test", "./...", "-json"])
-    elif (project_dir / "Cargo.toml").exists():
-        result = ("cargo", ["cargo", "test"])
-    elif (project_dir / "package.json").exists():
+        return "go", ["go", "test", "./...", "-json"]
+    if (project_dir / "Cargo.toml").exists():
+        return "cargo", ["cargo", "test"]
+    if (project_dir / "package.json").exists():
         try:
             data = json.loads((project_dir / "package.json").read_text(encoding="utf-8"))
             scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
@@ -53,26 +43,13 @@ def discover(project_dir: Path) -> tuple[str, list[str]]:
             deps.update(data.get("dependencies", {}) if isinstance(data, dict) else {})
             deps.update(data.get("devDependencies", {}) if isinstance(data, dict) else {})
             if "jest" in deps or "jest" in str(scripts.get("test", "")):
-                result = ("jest", ["npx", "jest", "--json"])
-            elif "test" in scripts:
-                result = ("npm", ["npm", "test"])
-            else:
-                result = ("jest", ["npx", "jest", "--json"])
+                return "jest", ["npx", "jest", "--json"]
+            if "test" in scripts:
+                return "npm", ["npm", "test"]
         except Exception:
-            result = ("jest", ["npx", "jest", "--json"])
-    else:
-        result = ("pytest", [sys.executable, "-m", "pytest", "-q", "--tb=short"])
-    
-    _TEST_DISCOVER_CACHE[cache_key] = (result[0], result[1], time.time())
-    return result
-
-
-def _resolve_project_dir(filepath: str = "", project_dir: str = ".") -> Path:
-    if filepath:
-        p = Path(filepath).resolve()
-        if p.exists():
-            return p.parent if p.is_file() else p
-    return Path(project_dir or ".").resolve()
+            pass
+        return "jest", ["npx", "jest", "--json"]
+    return "pytest", [sys.executable, "-m", "pytest", "-q", "--tb=short"]
 
 
 def _run(args: list[str], cwd: Path, timeout: int) -> tuple[int, str, str, float, bool]:
@@ -294,9 +271,6 @@ def run(
         valid = validate_command(args, allow_high_risk=False)
         if not valid.get("ok"):
             return valid
-        path_check = validate_command_args(args, root)
-        if path_check:
-            return path_check
         exe = Path(args[0]).name.lower().removesuffix(".exe")
         framework = {"python": "pytest", "py": "pytest", "pytest": "pytest", "go": "go", "cargo": "cargo", "npx": "jest", "npm": "npm"}.get(exe, framework)
 

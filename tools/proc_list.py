@@ -4,8 +4,6 @@ proc_list — 进程列表查询。
 """
 
 import os
-import time
-import threading
 
 from ._helpers import proposal_reply, _run_cmd
 
@@ -15,42 +13,19 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-# 缓存：进程列表（5秒TTL），锁保护并发访问
-_PROC_CACHE = None
-_PROC_CACHE_TIME = 0
-_PROC_CACHE_TTL = 5.0
-_PROC_LOCK = threading.Lock()
-
 
 def list_processes(filter_name: str | None = None) -> dict:
     """列出所有进程。可通过 filter_name 按名称模糊过滤。"""
-    # 无过滤时尝试缓存
-    if not filter_name:
-        with _PROC_LOCK:
-            if _PROC_CACHE is not None:
-                if (time.time() - _PROC_CACHE_TIME) < _PROC_CACHE_TTL:
-                    return _PROC_CACHE
-    
     if HAS_PSUTIL:
-        result = _list_psutil(filter_name)
-    elif os.name == "nt":
-        result = _list_windows(filter_name)
-    else:
-        result = _list_posix(filter_name)
-    
-    # 缓存无过滤结果
-    if not filter_name and result.get("ok"):
-        with _PROC_LOCK:
-            _PROC_CACHE = result
-            _PROC_CACHE_TIME = time.time()
-    
-    return result
+        return _list_psutil(filter_name)
+    if os.name == "nt":
+        return _list_windows(filter_name)
+    return _list_posix(filter_name)
 
 
 def _list_psutil(filter_name: str | None) -> dict:
     """psutil 后端：跨平台 + 结构化 + 性能最优"""
     processes = []
-    # 使用 process_iter 指定字段，避免获取全量信息
     for proc in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
             info = proc.info
@@ -70,14 +45,6 @@ def _list_psutil(filter_name: str | None) -> dict:
         "filter": filter_name,
         "processes": sorted(processes, key=lambda p: -p["memory_kb"]),
     }
-
-
-def _parse_mem_kb(mem_str: str) -> int:
-    """解析 tasklist 内存字符串为 KB。"""
-    try:
-        return int(mem_str.replace(" K", "").replace(".", "").replace(",", "").strip())
-    except ValueError:
-        return 0
 
 
 def _list_windows(filter_name: str | None) -> dict:
@@ -102,7 +69,19 @@ def _list_windows(filter_name: str | None) -> dict:
         if len(parts) >= 5:
             name = parts[0]
             pid = parts[1]
-            mem_kb = _parse_mem_kb(parts[4])
+            try:
+                mem_str = parts[4].replace(" K", "").strip()
+                mem_kb = int(mem_str)
+            except (ValueError, IndexError):
+                try:
+                    mem_kb = int(mem_str.replace(".", ""))
+                except ValueError:
+                    try:
+                        mem_kb = int(mem_str.replace(",", ""))
+                    except ValueError:
+                        import logging
+                        logging.getLogger("astrbot").debug("proc_list: unexpected memory format: %s", mem_str)
+                        mem_kb = 0
 
             if filter_name and filter_name.lower() not in name.lower():
                 continue

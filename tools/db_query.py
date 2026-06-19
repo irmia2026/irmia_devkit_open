@@ -28,21 +28,18 @@ def query(db_path: str, sql: str, params: list = None) -> dict:
     params = params or []
     try:
         uri_path = str(p.resolve()).replace("\\", "/")
-        conn = sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True)
-        try:
+        with sqlite3.connect(f"file:{uri_path}?mode=ro", uri=True) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(sql, params)
             columns = [d[0] for d in cur.description] if cur.description else []
             rows = [dict(r) for r in cur.fetchall()]
-            return {
-                "ok": True,
-                "columns": columns,
-                "rows": rows[:200],
-                "count": len(rows),
-                "truncated": len(rows) > 200,
-            }
-        finally:
-            conn.close()
+        return {
+            "ok": True,
+            "columns": columns,
+            "rows": rows[:200],
+            "count": len(rows),
+            "truncated": len(rows) > 200,
+        }
     except sqlite3.Error as e:
         return proposal_reply(
             False,
