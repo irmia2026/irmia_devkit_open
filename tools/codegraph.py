@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast as py_ast
 import concurrent.futures
 import json
+import logging
 import multiprocessing
 import os
 import re
@@ -17,6 +18,8 @@ import sqlite3
 import time
 from collections import defaultdict
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ── optional deps ────────────────────────────────────
 
@@ -178,8 +181,8 @@ class CodeGraph:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_edge_kind ON edges(kind)")
         try:
             conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS sym_fts USING fts5(name, file, signature)")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
         conn.commit()
         self._conn = conn
 
@@ -192,8 +195,8 @@ class CodeGraph:
         if self._conn:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
             self._conn = None
 
     # ── index ─────────────────────────────────────────
@@ -210,8 +213,8 @@ class CodeGraph:
             conn.execute("DELETE FROM edges")
             try:
                 conn.execute("DELETE FROM sym_fts")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
 
         stats = {"files": 0, "symbols": 0, "edges": 0, "skipped": 0}
         mtimes: dict[str, float] = {}
@@ -328,8 +331,8 @@ class CodeGraph:
 
         try:
             _resolve_references(conn)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
 
         if incremental:
             conn.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('mtimes',?)", (json.dumps(mtimes),))
@@ -493,8 +496,8 @@ class CodeGraph:
             ).fetchall()
             if rows:
                 return [_row_to_dict(r) for r in rows], "like"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
 
         tokens = _tokenize_query(query)
         if tokens:
@@ -514,8 +517,8 @@ class CodeGraph:
                             result.append(_row_to_dict(sr))
                     if result:
                         return result, "fts5"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
 
         # try LIKE on wider field
         try:
@@ -525,8 +528,8 @@ class CodeGraph:
             ).fetchall()
             if rows:
                 return [_row_to_dict(r) for r in rows], "like_wide"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
 
         return [], "none"
 
@@ -566,8 +569,8 @@ class CodeGraph:
                 for r in rows:
                     result.append({"name": r[0], "kind": r[1], "file": r[2], "line": r[3]})
                 return result[:limit]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
         return []
 
     # ── relationship map ──────────────────────────────
@@ -759,8 +762,8 @@ class CodeGraph:
         try:
             conn.execute("SELECT count(*) FROM sym_fts").fetchone()
             fts_ok = True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
 
         missing: list[str] = []
         if HAS_TREE_SITTER:
@@ -805,8 +808,8 @@ def _extract_file(filepath: str, suffix: str) -> tuple[list[dict], list[dict]]:
     if HAS_TREE_SITTER:
         try:
             return _extract_ts(filepath, lang)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
     return [], []
 
 
@@ -857,8 +860,8 @@ def _extract_python(filepath: str) -> tuple[list[dict], list[dict]]:
                         arg += f": {py_ast.unparse(a.annotation)}"
                     args.append(arg)
                 sig = f"def {node.name}({', '.join(args)})"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
             symbols.append({"name": fn, "kind": "method" if self._current_cls else "function",
                            "line": node.lineno, "signature": sig,
                            "source": (py_ast.get_source_segment(source, node) or "")[:6000],
@@ -881,8 +884,8 @@ def _extract_python(filepath: str) -> tuple[list[dict], list[dict]]:
                         arg += f": {py_ast.unparse(a.annotation)}"
                     args.append(arg)
                 sig = f"async def {node.name}({', '.join(args)})"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
             symbols.append({"name": fn, "kind": "method" if self._current_cls else "function",
                            "line": node.lineno, "signature": sig,
                            "source": (py_ast.get_source_segment(source, node) or "")[:6000],

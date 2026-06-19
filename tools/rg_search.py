@@ -164,7 +164,7 @@ def _python_fallback(
 
             # 扩展名过滤
             if file_exts:
-                ext = os.path.splitext(fname)[1].lstrip(".")
+                ext = os.path.splitext(fname)[1].lstrip(".").lower()
                 if ext not in file_exts:
                     continue
 
@@ -251,7 +251,7 @@ def search(
     if not os.path.isdir(search_path):
         return {"ok": False, "error": f"目录不存在: {search_path}"}
 
-    exts = [e.strip().lstrip(".") for e in file_exts.split(",") if e.strip()]
+    exts = [e.strip().lstrip(".").lower() for e in file_exts.split(",") if e.strip()]
 
     # ── Layer 1: ripgrep ──
     rg_path = _find_rg()

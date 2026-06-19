@@ -59,7 +59,7 @@ def _detect_language(root: Path, ctx: dict):
             if count > 2000:
                 break
             for ext, lang in detectors:
-                if f.suffix == ext:
+                if f.suffix.lower() == ext:
                     scored[lang] = scored.get(lang, 0) + 1
                     break
     if scored:

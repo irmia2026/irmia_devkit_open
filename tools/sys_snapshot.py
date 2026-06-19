@@ -31,7 +31,6 @@ def snapshot() -> dict:
         info["available_memory_mb"] = None
         info["process_count"] = None
         info["_note"] = "macOS 不支持完整系统快照，欢迎提交 PR"
-        info["_note"] = "macOS 不支持完整系统快照，欢迎提交 PR"
     else:
         _linux_info(info)
 

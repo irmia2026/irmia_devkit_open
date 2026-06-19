@@ -36,7 +36,7 @@ def _posix_mounts() -> list[dict]:
     for mp in mount_points:
         try:
             usage = shutil.disk_usage(mp)
-            key = usage.total  # 去重：同一设备多挂载点只报一次
+            key = mp  # 按挂载点路径去重，避免同容量不同挂载点被误跳过
             if key in seen:
                 continue
             seen.add(key)

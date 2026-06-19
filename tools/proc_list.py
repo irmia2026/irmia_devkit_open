@@ -47,9 +47,18 @@ def _list_psutil(filter_name: str | None) -> dict:
     }
 
 
+def _windows_encoding() -> str:
+    """选择 tasklist 输出编码：中文系统常用 gbk，其他尝试 cp437/oem。"""
+    import locale
+    enc = locale.getpreferredencoding(False)
+    if enc and enc.lower() in ("gbk", "gb2312", "gb18030", "cp936"):
+        return "gbk"
+    return "cp437"
+
+
 def _list_windows(filter_name: str | None) -> dict:
     """Windows: tasklist /FO CSV"""
-    result = _run_cmd(["tasklist", "/FO", "CSV", "/NH"], timeout=10, encoding="gbk")
+    result = _run_cmd(["tasklist", "/FO", "CSV", "/NH"], timeout=10, encoding=_windows_encoding())
     if not result["ok"]:
         if "未安装" in result.get("error", ""):
             return proposal_reply(

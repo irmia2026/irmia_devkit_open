@@ -48,6 +48,7 @@ MAX_HEX_LINES = 64                       # hex preview 最多 64 行
 MAX_DIR_ENTRIES = 50                     # 目录读取最大条目数
 SKELETON_MAX_SIZE = 512 * 1024           # skeleton 模式最大处理 512KB
 SKELETON_MAX_LINES = 5000                # skeleton 模式最多处理 5000 行
+_SMALL_FILE_THRESHOLD = 1024 * 1024      # 小文件阈值：小于此值精确统计总行数
 
 # 向后兼容别名
 MAX_RETURN_BYTES = MAX_BYTES_PER_CALL
@@ -307,7 +308,7 @@ def _read_lines_range(
 
             if current_line + 1 > end:
                 # 小文件继续精确统计总行数；大文件保持已计数值，由 has_more 表达未读完
-                if file_size <= 1024 * 1024:
+                if file_size <= _SMALL_FILE_THRESHOLD:
                     for _ in f:
                         total_lines += 1
                 break
@@ -318,7 +319,7 @@ def _read_lines_range(
             if len(lines) >= max_lines:
                 hit_limit = True
                 # 大文件不再扫描剩余行，直接估算；小文件继续精确统计
-                if file_size > 1024 * 1024:
+                if file_size > _SMALL_FILE_THRESHOLD:
                     break
                 # 小文件：继续扫描统计总行数
                 for _ in f:
@@ -407,7 +408,7 @@ def _read_tail(
             buffer.appendleft(partial.decode(encoding, errors="replace"))
 
         # 统计总行数：只在文件不大时精确计算，否则估算
-        total_lines = _estimate_line_count(p, size) if size > 1024 * 1024 else _count_lines_exact(p, encoding)
+        total_lines = _estimate_line_count(p, size) if size > _SMALL_FILE_THRESHOLD else _count_lines_exact(p, encoding)
 
     lines = list(buffer)
     start_line = max(1, total_lines - len(lines) + 1)
@@ -719,7 +720,7 @@ def read(
         )
     
     metadata = _get_metadata(p) if include_metadata else {}
-    file_size = p.stat().st_size
+    file_size = metadata.get('size', p.stat().st_size)
     
     if file_size > MAX_FILE_SIZE:
         return proposal_reply(

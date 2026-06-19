@@ -90,6 +90,9 @@ def _redact_value(key: str, value: Any) -> Any:
     return type(value).__name__
 
 
+_MAX_PATH_LOG_LEN = 4096  # 审计日志中路径字段长度上限
+
+
 def _params_summary(params: dict[str, Any]) -> str:
     if not isinstance(params, dict):
         return ""
@@ -104,7 +107,7 @@ def _extract_file_paths(params: dict[str, Any]) -> str:
 
     def add(value: Any) -> None:
         if isinstance(value, str) and value:
-            paths.append(value[:260])
+            paths.append(value[:_MAX_PATH_LOG_LEN])
         elif isinstance(value, list):
             for item in value:
                 add(item)
