@@ -320,3 +320,50 @@ class TestFileReadEdgeCases:
         assert "🎉" in result["content"]
         assert "日本語" in result["content"]
         assert "한국어" in result["content"]
+
+
+class TestFileReadProposal:
+    """safe_read 错误路径应返回 proposal 协议字段。"""
+
+    def test_nonexistent_returns_proposal(self, tmp_dir):
+        f = Path(tmp_dir) / "missing.txt"
+        result = safe_read.read(str(f))
+        assert result["ok"] is False
+        assert "proposal" in result
+        assert "options" in result
+        assert "next_call" in result
+
+    def test_too_large_returns_proposal(self, tmp_dir):
+        f = Path(tmp_dir) / "huge.txt"
+        f.write_text("x" * (11 * 1024 * 1024), encoding="utf-8")
+        result = safe_read.read(str(f))
+        assert result["ok"] is False
+        assert "proposal" in result
+        assert "next_call" in result
+        assert result["next_call"]["tool"] == "safe_read"
+        assert result["next_call"]["args"]["mode"] == "skeleton"
+
+    def test_directory_with_wrong_mode_returns_proposal(self, tmp_dir):
+        d = Path(tmp_dir) / "testdir"
+        d.mkdir()
+        result = safe_read.read(str(d), mode="text")
+        assert result["ok"] is False
+        assert "proposal" in result
+        assert result["next_call"]["tool"] == "safe_read"
+        assert result["next_call"]["args"]["mode"] == "directory"
+
+    def test_forbidden_path_returns_proposal(self):
+        result = safe_read.read("C:/Windows/System32/kernel32.dll")
+        assert result["ok"] is False
+        assert "proposal" in result
+        assert "options" in result
+
+    def test_tail_performance_on_large_file(self, tmp_dir):
+        """tail 模式不应扫描整个大文件。"""
+        f = Path(tmp_dir) / "big.log"
+        f.write_text("\n".join(f"line {i}" for i in range(1, 10001)), encoding="utf-8")
+        result = safe_read.read(str(f), tail=3)
+        assert result["ok"] is True
+        assert result["returned_lines"] == 3
+        assert "9998" in result["content"]
+        assert "10000" in result["content"]

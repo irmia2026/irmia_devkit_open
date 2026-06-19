@@ -35,6 +35,7 @@ from ._file_utils import (
     SymlinkGuard,
     check_path_allowed,
 )
+from ._helpers import proposal_reply
 
 
 # ── 配置阈值 ──
@@ -45,6 +46,8 @@ MAX_LINES_PER_CALL = 200                 # 每次最多返回 200 行
 MAX_HEX_BYTES = 1024                     # hex preview 最多 1KB
 MAX_HEX_LINES = 64                       # hex preview 最多 64 行
 MAX_DIR_ENTRIES = 50                     # 目录读取最大条目数
+SKELETON_MAX_SIZE = 512 * 1024           # skeleton 模式最大处理 512KB
+SKELETON_MAX_LINES = 5000                # skeleton 模式最多处理 5000 行
 
 
 # ── Hex Preview ──
@@ -150,41 +153,51 @@ def _read_lines_range(
     max_lines: int = MAX_LINES_PER_CALL,
 ) -> tuple[list[str], int, int, int, bool]:
     """读取指定行号范围的内容。
-    
+
     返回：(lines, actual_start, actual_end, total_lines, has_more)
+
+    小文件（<=1MB）精确统计 total_lines；大文件在 max_lines 命中后停止扫描，
+    total_lines 按已读行数 + has_more 估算，避免全文件遍历。
     """
     p = Path(path)
+    file_size = p.stat().st_size
     lines = []
     current_line = 0
     total_lines = 0
-    
+    hit_limit = False
+
     start = max(1, start_line)
     end = end_line if end_line > 0 else float('inf')
-    
+
     with p.open('r', encoding=encoding, errors='replace') as f:
         for line in f:
             total_lines += 1
-            
+
             if current_line + 1 < start:
                 current_line += 1
                 continue
-            
+
             if current_line + 1 > end:
+                total_lines -= 1  # 回退最后一行未返回的计数
                 break
-            
+
             lines.append(line.rstrip('\n').rstrip('\r'))
             current_line += 1
-            
+
             if len(lines) >= max_lines:
-                # 继续扫描统计总行数
+                hit_limit = True
+                # 大文件不再扫描剩余行，直接估算；小文件继续精确统计
+                if file_size > 1024 * 1024:
+                    break
+                # 小文件：继续扫描统计总行数
                 for _ in f:
                     total_lines += 1
                 break
-    
-    actual_start = start if start <= total_lines else 0
+
+    actual_start = start if start <= total_lines or (hit_limit and lines) else 0
     actual_end = actual_start + len(lines) - 1 if lines else 0
-    has_more = actual_end < total_lines
-    
+    has_more = actual_end < total_lines or hit_limit
+
     return lines, actual_start, actual_end, total_lines, has_more
 
 
@@ -216,26 +229,82 @@ def _read_tail(
     encoding: str,
     n_lines: int = MAX_LINES_PER_CALL,
 ) -> tuple[list[str], int, int, bool]:
-    """读取文件尾部 n 行。
-    
+    """读取文件尾部 n 行，使用从尾部倒读字节块的方式，避免扫描整个大文件。
+
     返回：(lines, total_lines, start_line, has_more)
     """
     from collections import deque
-    
+
     p = Path(path)
+    chunk_size = 8192
     buffer = deque(maxlen=n_lines)
+    partial = b""
     total_lines = 0
-    
-    with p.open('r', encoding=encoding, errors='replace') as f:
-        for line in f:
-            total_lines += 1
-            buffer.append(line.rstrip('\n').rstrip('\r'))
-    
+
+    with p.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        if size == 0:
+            return [], 0, 1, False
+
+        offset = size
+        while offset > 0 and len(buffer) < n_lines:
+            read_size = min(chunk_size, offset)
+            offset -= read_size
+            f.seek(offset)
+            chunk = f.read(read_size)
+            # 按换行分割，保留最后一个不完整的行到 partial
+            lines = chunk.split(b"\n")
+            # 第一个片段与之前累积的不完整行拼接
+            lines[-1] += partial
+            partial = lines.pop(0)
+            # 从后向前收集完整行
+            for line in reversed(lines):
+                if line.endswith(b"\r"):
+                    line = line[:-1]
+                decoded = line.decode(encoding, errors="replace")
+                buffer.appendleft(decoded)
+                if len(buffer) >= n_lines:
+                    break
+            if len(buffer) >= n_lines:
+                break
+
+        # 处理文件开头的不完整行
+        if partial and len(buffer) < n_lines:
+            if partial.endswith(b"\r"):
+                partial = partial[:-1]
+            buffer.appendleft(partial.decode(encoding, errors="replace"))
+
+        # 统计总行数：只在文件不大时精确计算，否则估算
+        total_lines = _estimate_line_count(p, size) if size > 1024 * 1024 else _count_lines_exact(p, encoding)
+
     lines = list(buffer)
     start_line = max(1, total_lines - len(lines) + 1)
     has_more = start_line > 1
-    
     return lines, total_lines, start_line, has_more
+
+
+def _estimate_line_count(path: str | Path, size: int) -> int:
+    """基于文件大小和采样估算行数（用于超大文件 tail）。"""
+    p = Path(path)
+    sample_size = min(8192, size)
+    if sample_size == 0:
+        return 0
+    with p.open("r", encoding="utf-8", errors="replace") as f:
+        sample = f.read(sample_size)
+    avg_line = len(sample.splitlines()) / max(len(sample), 1)
+    if avg_line == 0:
+        avg_line = 0.01
+    return max(1, int(size * avg_line / sample_size))
+
+
+def _count_lines_exact(path: str | Path, encoding: str) -> int:
+    """精确统计文件行数。"""
+    total = 0
+    with Path(path).open("r", encoding=encoding, errors="replace") as f:
+        for _ in f:
+            total += 1
+    return total
 
 
 # ── Skeleton 模式 ──
@@ -244,7 +313,21 @@ def _extract_skeleton(path: str | Path, encoding: str) -> dict[str, Any]:
     """提取代码文件的骨架结构（类、函数、导入）。"""
     p = Path(path)
     ext = p.suffix.lower()
-    
+    file_size = p.stat().st_size
+
+    if file_size > SKELETON_MAX_SIZE:
+        return {
+            "language": ext.lstrip(".") if ext else "unknown",
+            "total_lines": None,
+            "imports": [],
+            "classes": [],
+            "functions": [],
+            "import_count": 0,
+            "class_count": 0,
+            "function_count": 0,
+            "note": f"文件超过 skeleton 处理上限 {human_size(SKELETON_MAX_SIZE)}，建议用 rg_search 或 safe_read head/tail",
+        }
+
     language_map = {
         '.py': 'python',
         '.js': 'javascript',
@@ -266,14 +349,20 @@ def _extract_skeleton(path: str | Path, encoding: str) -> dict[str, Any]:
         '.nim': 'nim',
     }
     language = language_map.get(ext, 'unknown')
-    
+
     imports = []
     classes = []
     functions = []
-    
+
     with p.open('r', encoding=encoding, errors='replace') as f:
-        content = f.read()
-    
+        # 只读取前 SKELETON_MAX_LINES 行，避免大文件全量读入
+        content_lines = []
+        for i, line in enumerate(f):
+            if i >= SKELETON_MAX_LINES:
+                break
+            content_lines.append(line)
+        content = ''.join(content_lines)
+
     lines = content.split('\n')
     
     if language == 'python':
@@ -496,7 +585,13 @@ def read(
     # 0. 路径安全校验（与 safe_write/file_remove 同级）
     forbidden = check_path_allowed(path)
     if forbidden:
-        return forbidden
+        return proposal_reply(
+            False,
+            "路径受保护或包含目录穿越，读取被拦截。",
+            error=forbidden.get("error", "路径不允许"),
+            evidence={"path": path},
+            options=["dir_list", "rg_search"],
+        )
 
     # 1. symlink 控制：不自动跟随 symlink 跳出工作目录/进入系统目录
     #    必须在 resolve() 之前检查，因为 resolve() 会跟随 symlink。
@@ -509,22 +604,27 @@ def read(
                 resolved_target = (raw_path.parent / resolved_target).resolve()
             forbidden_target = check_path_allowed(resolved_target)
             if forbidden_target:
-                return {
-                    'ok': False,
-                    'error': f'Symlink 指向受保护路径: {resolved_target}',
-                    'path': str(raw_path),
-                }
+                return proposal_reply(
+                    False,
+                    f"Symlink 指向受保护路径，读取被拦截。",
+                    error=f"Symlink 指向受保护路径: {resolved_target}",
+                    evidence={"path": str(raw_path), "symlink_target": str(resolved_target)},
+                    options=["dir_list", "rg_search"],
+                )
     except OSError:
         pass
 
     p = raw_path.resolve()
 
     if not p.exists():
-        return {
-            'ok': False,
-            'error': f'Path not found: {path}',
-            'path': str(p),
-        }
+        return proposal_reply(
+            False,
+            f"路径不存在: {path}",
+            error=f'Path not found: {path}',
+            evidence={"path": str(p)},
+            options=["dir_list", "safe_write"],
+            next_call={"tool": "dir_list", "args": {"path": str(p.parent) if p.parent else "."}},
+        )
     
     # 目录读取
     if p.is_dir():
@@ -553,36 +653,44 @@ def read(
                 
                 return result
             except Exception as e:
-                return {
-                    'ok': False,
-                    'error': f'Failed to read directory: {e}',
-                    'path': str(p),
-                }
+                return proposal_reply(
+                    False,
+                    f'读取目录失败: {e}',
+                    error=f'Failed to read directory: {e}',
+                    evidence={"path": str(p)},
+                    options=["dir_list", "dir_tree"],
+                )
         else:
-            return {
-                'ok': False,
-                'error': f'Path is a directory, cannot read as {mode}',
-                'path': str(p),
-            }
+            return proposal_reply(
+                False,
+                f'路径是目录，无法用 {mode} 模式读取。',
+                error=f'Path is a directory, cannot read as {mode}',
+                evidence={"path": str(p), "mode": mode},
+                options=["directory", "dir_list", "dir_tree"],
+                next_call={"tool": "safe_read", "args": {"path": str(p), "mode": "directory"}},
+            )
     
     if not p.is_file():
-        return {
-            'ok': False,
-            'error': f'Path is not a file: {path}',
-            'path': str(p),
-        }
+        return proposal_reply(
+            False,
+            f'路径不是普通文件，无法用 {mode} 模式读取。',
+            error=f'Path is not a file: {path}',
+            evidence={"path": str(p)},
+            options=["dir_list", "safe_write"],
+        )
     
     metadata = _get_metadata(p) if include_metadata else {}
     file_size = p.stat().st_size
     
     if file_size > MAX_FILE_SIZE:
-        return {
-            'ok': False,
-            'error': f'File too large ({metadata.get("human_size", file_size)} > {human_size(MAX_FILE_SIZE)}). Use skeleton mode or rg_search.',
-            'path': str(p),
-            'metadata': metadata,
-            'suggested_mode': 'skeleton',
-        }
+        return proposal_reply(
+            False,
+            f'文件过大（{metadata.get("human_size", file_size)} > {human_size(MAX_FILE_SIZE)}），直接读取会超出限额。',
+            error=f'File too large ({metadata.get("human_size", file_size)} > {human_size(MAX_FILE_SIZE)})',
+            evidence={"path": str(p), "size": file_size, "human_size": metadata.get("human_size", human_size(file_size))},
+            options=["skeleton", "rg_search", "head", "tail"],
+            next_call={"tool": "safe_read", "args": {"path": str(p), "mode": "skeleton"}},
+        )
     
     detected_encoding = encoding if encoding != 'auto' else detect_encoding(p)
     is_binary, binary_reason = is_binary_file(p)
