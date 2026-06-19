@@ -153,9 +153,6 @@ def _result_status(result: Any) -> tuple[str, str]:
     return "ok", ""
 
 
-import atexit
-
-
 # 批量写入缓冲
 _BATCH: list[tuple] = []
 _BATCH_LOCK = threading.Lock()
@@ -164,8 +161,16 @@ _BATCH_FLUSH_INTERVAL = 5.0
 _LAST_FLUSH = 0.0
 
 
-# 注册 atexit 确保进程退出时刷盘
-atexit.register(lambda: _flush(force=True))
+def shutdown() -> None:
+    """插件卸载/热重载时调用：强制刷盘并清理线程级连接。"""
+    _flush(force=True)
+    # 关闭当前线程的连接（如果存在）
+    if hasattr(_CONN_LOCAL, 'conn') and _CONN_LOCAL.conn is not None:
+        try:
+            _CONN_LOCAL.conn.close()
+        except Exception:
+            pass
+        _CONN_LOCAL.conn = None
 
 
 def _flush(force: bool = False) -> None:

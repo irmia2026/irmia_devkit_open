@@ -154,6 +154,9 @@ def _python_fallback(
                 ext = os.path.splitext(fname)[1].lstrip(".")
                 if ext not in file_exts:
                     continue
+
+            fpath = os.path.join(root, fname)
+
             # 快速跳过：大文件不搜索内容
             try:
                 st = os.stat(fpath)
@@ -164,7 +167,6 @@ def _python_fallback(
                 continue
 
             files_searched += 1
-            fpath = os.path.join(root, fname)
             try:
                 with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                     for lineno, line in enumerate(f, 1):

@@ -493,29 +493,31 @@ def read(
         max_entries: 目录读取时最大条目数
         include_hidden: 是否包含隐藏文件
     """
-    p = Path(path).expanduser().resolve()
-    
     # 0. 路径安全校验（与 safe_write/file_remove 同级）
     forbidden = check_path_allowed(path)
     if forbidden:
         return forbidden
 
     # 1. symlink 控制：不自动跟随 symlink 跳出工作目录/进入系统目录
+    #    必须在 resolve() 之前检查，因为 resolve() 会跟随 symlink。
+    raw_path = Path(path).expanduser()
     try:
-        if p.is_symlink():
-            target = os.readlink(p)
+        if raw_path.is_symlink():
+            target = os.readlink(raw_path)
             resolved_target = Path(target)
             if not resolved_target.is_absolute():
-                resolved_target = (p.parent / resolved_target).resolve()
+                resolved_target = (raw_path.parent / resolved_target).resolve()
             forbidden_target = check_path_allowed(resolved_target)
             if forbidden_target:
                 return {
                     'ok': False,
                     'error': f'Symlink 指向受保护路径: {resolved_target}',
-                    'path': str(p),
+                    'path': str(raw_path),
                 }
     except OSError:
         pass
+
+    p = raw_path.resolve()
 
     if not p.exists():
         return {

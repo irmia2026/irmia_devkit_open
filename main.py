@@ -383,3 +383,17 @@ class Main(star.Star):
     @property
     def _allowed_ids(self) -> set:
         return self._allowed_ids_cache
+
+    async def terminate(self) -> None:
+        """插件卸载/热重载时清理资源：刷盘审计日志、关闭 run_sync 线程池。"""
+        try:
+            from .tools import op_log as _op_log
+            _op_log.shutdown()
+        except Exception:
+            pass
+        try:
+            from .tools._helpers import shutdown_run_sync
+            shutdown_run_sync()
+        except Exception:
+            pass
+        logger.info("devkit terminated")

@@ -13,14 +13,20 @@ from typing import Any
 from ._http_utils import check_url, make_opener
 
 
+_MAX_BODY_SIZE = 1 * 1024 * 1024  # 1MB：超过则截断，防止内存爆炸
+
+
 def _build_response(resp) -> dict:
-    body = resp.read().decode("utf-8", errors="replace")
+    body = resp.read(_MAX_BODY_SIZE + 1).decode("utf-8", errors="replace")
+    truncated = len(body) > _MAX_BODY_SIZE
+    if truncated:
+        body = body[:_MAX_BODY_SIZE]
     return {
         "ok": True,
         "status": resp.status,
         "size": len(body),
         "body": body[:5000],
-        "truncated": len(body) > 5000,
+        "truncated": truncated or len(body) > 5000,
     }
 
 

@@ -14,6 +14,18 @@ from . import op_log as _op_log
 logger = logging.getLogger(__name__)
 
 
+# 关键操作工具：审计日志需要立即落盘
+_CRITICAL_TOOLS = frozenset({
+    "safe_edit",
+    "safe_write",
+    "file_remove",
+    "shell_exec",
+    "symbol_rename",
+    "multi_edit",
+    "safe_rollback",
+})
+
+
 def protect_tool(tool, allowed_ids, access_checker=None):
     """原地包裹 tool.call，注入管理员鉴权。"""
     original_call = tool.call
@@ -34,6 +46,7 @@ def protect_tool(tool, allowed_ids, access_checker=None):
                 allowed = event.is_admin() or sender_id in allowed_ids
             if allowed:
                 start = time.monotonic()
+                sync = tool_name in _CRITICAL_TOOLS
                 try:
                     result = await original_call(context, **kwargs)
                     _op_log.record(
@@ -41,6 +54,7 @@ def protect_tool(tool, allowed_ids, access_checker=None):
                         kwargs,
                         result,
                         int((time.monotonic() - start) * 1000),
+                        sync=sync,
                     )
                     return result
                 except Exception as exc:
