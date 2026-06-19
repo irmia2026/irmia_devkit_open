@@ -1082,13 +1082,13 @@ MdStripTool = make_tool(
 
 FileReadTool = make_tool(
     "safe_read",
-    "【安全文件读取——替代 AstrBot 原生 file_read】安全读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、目录列表。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常、支持目录读取。搜索请用 rg_search，不要在此工具内使用。",
+    "【安全文件读取——替代 AstrBot 原生 file_read】安全读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、hex 转储、骨架提取。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常。目录浏览请用 dir_list / dir_tree；搜索请用 rg_search，不要在此工具内使用。",
     {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "文件或目录路径",
+                    "description": "文件路径（目录请使用 dir_list 或 dir_tree）",
                 },
                 "start_line": {
                     "type": "integer",
@@ -1122,7 +1122,7 @@ FileReadTool = make_tool(
                 },
                 "mode": {
                     "type": "string",
-                    "description": "模式：auto / text / binary / hex / skeleton / directory",
+                    "description": "模式：auto / text / binary / hex / skeleton（目录请使用 dir_list / dir_tree）",
                     "default": "auto",
                 },
                 "offset": {
@@ -1137,17 +1137,17 @@ FileReadTool = make_tool(
                 },
                 "max_depth": {
                     "type": "integer",
-                    "description": "目录读取时最大递归深度",
+                    "description": "已弃用：目录读取已移除，请使用 dir_list / dir_tree",
                     "default": 3,
                 },
                 "max_entries": {
                     "type": "integer",
-                    "description": "目录读取时最大条目数",
+                    "description": "已弃用：目录读取已移除，请使用 dir_list / dir_tree",
                     "default": 50,
                 },
                 "include_hidden": {
                     "type": "boolean",
-                    "description": "目录读取时是否包含隐藏文件",
+                    "description": "已弃用：目录读取已移除，请使用 dir_list / dir_tree",
                     "default": False,
                 },
                 "include_metadata": {

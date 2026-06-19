@@ -92,6 +92,82 @@ class TestFileReadPagination:
         assert result["truncated"] is True
 
 
+class TestFileReadNavigation:
+    """safe_read 截断导航字段验证。"""
+
+    def test_header_footer_in_range_mode(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 301)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), start_line=10, end_line=20)
+
+        assert result["ok"] is True
+        assert "header" in result
+        assert "footer" in result
+        assert "lines.txt" in result["header"]
+        assert "lines 10-20 of 300" in result["footer"]
+
+    def test_next_call_and_options_on_truncation(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 301)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), max_lines=50)
+
+        assert result["ok"] is True
+        assert result["truncated"] is True
+        assert result["next_call"]["tool"] == "safe_read"
+        assert result["next_call"]["args"]["start_line"] == 51
+        assert "Continue reading from line 51" in result["options"]
+        assert any("tail=50" in opt for opt in result["options"])
+
+    def test_head_mode_navigation(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 101)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), head=5)
+
+        assert result["ok"] is True
+        assert result["header"]
+        assert "lines 1-5 of 100" in result["footer"]
+        assert "95 more below" in result["footer"]
+        assert result["next_call"]["args"]["start_line"] == 6
+
+    def test_tail_mode_navigation(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 101)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), tail=5)
+
+        assert result["ok"] is True
+        assert result["header"]
+        assert "lines 96-100 of 100" in result["footer"]
+        assert "95 more above" in result["footer"]
+        assert result["next_call"]["args"]["end_line"] == 95
+
+    def test_no_footer_when_complete_file(self, tmp_dir):
+        f = Path(tmp_dir) / "small.txt"
+        f.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+
+        result = safe_read.read(str(f))
+
+        assert result["ok"] is True
+        assert result["header"]
+        assert result["footer"] == ""
+        assert result["next_call"] is None
+        assert result["options"] == []
+
+    def test_byte_limit_truncation_footer(self, tmp_dir):
+        f = Path(tmp_dir) / "longline.txt"
+        f.write_text("\n".join(f"line {i}: {'x' * 1000}" for i in range(200)), encoding="utf-8")
+
+        result = safe_read.read(str(f), max_lines=200)
+
+        assert result["ok"] is True
+        assert result["truncated"] is True
+        assert "truncated at 128KB" in result["footer"] or "128KB" in result["truncation_reason"]
+        # 本例已读到文件末尾，字节截断是因为单行过长，没有更多行可供 next_call
+
+
 class TestFileReadBinary:
     def test_binary_file_detection(self, tmp_dir):
         f = Path(tmp_dir) / "binary.bin"
@@ -129,44 +205,31 @@ class TestFileReadBinary:
 
 
 class TestFileReadDirectory:
-    def test_read_directory(self, tmp_dir):
+    def test_read_directory_returns_guidance(self, tmp_dir):
         d = Path(tmp_dir) / "testdir"
         d.mkdir()
         (d / "file1.txt").write_text("content1")
         (d / "file2.py").write_text("content2")
         (d / "subdir").mkdir()
-        
+
         result = safe_read.read(str(d))
-        
-        assert result["ok"] is True
-        assert result["mode"] == "directory"
-        assert result["total_entries"] == 3
-        assert len(result["entries"]) == 3
-        
-        names = [e["name"] for e in result["entries"]]
-        assert "file1.txt" in names
-        assert "file2.py" in names
-        assert "subdir" in names
-    
-    def test_read_directory_recursive(self, tmp_dir):
+
+        assert result["ok"] is False
+        assert "proposal" in result
+        assert "dir_list" in result["options"]
+        assert "dir_tree" in result["options"]
+        assert result["next_call"]["tool"] == "dir_list"
+        assert Path(result["next_call"]["args"]["path"]).resolve() == d.resolve()
+
+    def test_read_directory_with_metadata(self, tmp_dir):
         d = Path(tmp_dir) / "testdir"
         d.mkdir()
-        (d / "file1.txt").write_text("content1")
-        sub = d / "subdir"
-        sub.mkdir()
-        (sub / "nested.txt").write_text("nested")
-        
-        result = safe_read.read(str(d), recursive=True)
-        
-        assert result["ok"] is True
-        assert result["mode"] == "directory"
-        
-        # 找到 subdir 条目
-        subdir_entry = next((e for e in result["entries"] if e["name"] == "subdir"), None)
-        assert subdir_entry is not None
-        assert "children" in subdir_entry
-        assert len(subdir_entry["children"]) == 1
-        assert subdir_entry["children"][0]["name"] == "nested.txt"
+
+        result = safe_read.read(str(d), include_metadata=True)
+
+        assert result["ok"] is False
+        assert "metadata" in result["evidence"]
+        assert result["evidence"]["metadata"]["is_dir"] is True
 
 
 class TestFileReadSkeleton:
@@ -367,14 +430,14 @@ class TestFileReadProposal:
         assert result["next_call"]["tool"] == "safe_read"
         assert result["next_call"]["args"]["mode"] == "skeleton"
 
-    def test_directory_with_wrong_mode_returns_proposal(self, tmp_dir):
+    def test_directory_returns_proposal(self, tmp_dir):
         d = Path(tmp_dir) / "testdir"
         d.mkdir()
         result = safe_read.read(str(d), mode="text")
         assert result["ok"] is False
         assert "proposal" in result
-        assert result["next_call"]["tool"] == "safe_read"
-        assert result["next_call"]["args"]["mode"] == "directory"
+        assert result["next_call"]["tool"] == "dir_list"
+        assert Path(result["next_call"]["args"]["path"]).resolve() == d.resolve()
 
     def test_forbidden_path_returns_proposal(self):
         result = safe_read.read("C:/Windows/System32/kernel32.dll")

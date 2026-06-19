@@ -7,8 +7,7 @@ safe_read — 增强版安全文件读取工具。
 - 二进制文件检测 + hex preview
 - 行号范围（start_line / end_line）
 - Head / Tail 模式
-- 大文件截断（truncate）+ has_more 提示
-- 目录读取（递归/非递归）
+- 大文件截断（truncate）+ has_more 提示 + next_call 导航
 - 文件元信息（大小、编码、行数、修改时间）
 - Skeleton 模式（代码结构提取）
 
@@ -43,15 +42,15 @@ from ._helpers import proposal_reply
 MAX_FILE_SIZE = 10 * 1024 * 1024       # 10MB：硬拒绝读取内容
 LARGE_FILE_THRESHOLD = 100 * 1024         # 100KB：自动截断提示
 MAX_LINES_PER_CALL = 200                 # 每次最多返回 200 行
+MAX_BYTES_PER_CALL = 128 * 1024          # 每次返回内容上限 128KB（约 25K tokens）
 MAX_HEX_BYTES = 1024                     # hex preview 最多 1KB
 MAX_HEX_LINES = 64                       # hex preview 最多 64 行
 MAX_DIR_ENTRIES = 50                     # 目录读取最大条目数
 SKELETON_MAX_SIZE = 512 * 1024           # skeleton 模式最大处理 512KB
 SKELETON_MAX_LINES = 5000                # skeleton 模式最多处理 5000 行
 
-# 字节级硬限制（对齐原生 file_read 的安全水位）
-PROBE_BYTES = 512                        # 编码探针只读 512B
-MAX_RETURN_BYTES = 128 * 1024            # 单次返回内容上限 128KB（约 25K tokens）
+# 向后兼容别名
+MAX_RETURN_BYTES = MAX_BYTES_PER_CALL
 MAX_FULL_READ_BYTES = 256 * 1024         # 全量文本读取硬上限 256KB
 
 
@@ -73,6 +72,110 @@ def _truncate_content_by_bytes(lines: list[str], max_bytes: int) -> tuple[list[s
         if total >= max_bytes:
             return result, True
     return result, False
+
+
+def _truncate_string_to_byte_limit(text: str, max_bytes: int, encoding: str) -> str:
+    """在字符边界安全截断字符串，使其编码后不超过 max_bytes 字节。"""
+    if not text:
+        return text
+    encoded = text.encode(encoding, errors="replace")
+    if len(encoded) <= max_bytes:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(text[:mid].encode(encoding, errors="replace")) <= max_bytes:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]
+
+
+def _apply_byte_limit(content: str, encoding: str) -> tuple[str, bool]:
+    """对拼接后的 content 应用 128KB 字节硬上限。"""
+    encoded = content.encode(encoding, errors="replace")
+    if len(encoded) <= MAX_BYTES_PER_CALL:
+        return content, False
+    return _truncate_string_to_byte_limit(content, MAX_BYTES_PER_CALL, encoding), True
+
+
+def _build_header(
+    path: Path,
+    total_lines: int,
+    file_size: int,
+    encoding: str,
+    human_size_str: str | None = None,
+) -> str:
+    """合成 header 一行提示。"""
+    hs = human_size_str or human_size(file_size)
+    return f"[{path.name} · {total_lines} lines · {hs} · {encoding}]"
+
+
+def _build_footer(
+    start_line: int,
+    end_line: int,
+    total_lines: int,
+    has_more: bool,
+    byte_truncated: bool = False,
+    mode: str = "range",
+) -> str:
+    """合成 footer；无后续内容且未字节截断时返回空字符串。"""
+    if not has_more and not byte_truncated:
+        return ""
+    parts = []
+    if total_lines > 0:
+        parts.append(f"lines {start_line}-{end_line} of {total_lines}")
+    else:
+        parts.append(f"lines {start_line}-{end_line}")
+    if byte_truncated:
+        parts.append(f"truncated at {human_size(MAX_BYTES_PER_CALL)}")
+    if has_more:
+        if mode == "tail":
+            remaining = max(0, start_line - 1)
+            if remaining:
+                parts.append(f"{remaining} more above")
+        else:
+            remaining = max(0, total_lines - end_line)
+            if remaining:
+                parts.append(f"{remaining} more below")
+    return "[" + " —— ".join(parts) + "]"
+
+
+def _build_next_call_and_options(
+    path: str,
+    start_line: int,
+    end_line: int,
+    total_lines: int,
+    mode: str = "range",
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """截断时返回 next_call 与 options。"""
+    if mode == "tail":
+        if start_line <= 1:
+            return None, []
+        next_end = start_line - 1
+        next_start = max(1, next_end - MAX_LINES_PER_CALL + 1)
+        next_call = {
+            "tool": "safe_read",
+            "args": {"path": path, "start_line": next_start, "end_line": next_end},
+        }
+        options = [
+            f"Continue reading previous chunk (lines {next_start}-{next_end})",
+            "head=50 — reread from start",
+        ]
+    else:
+        if end_line >= total_lines:
+            return None, []
+        next_start = end_line + 1
+        next_call = {
+            "tool": "safe_read",
+            "args": {"path": path, "start_line": next_start, "max_lines": MAX_LINES_PER_CALL},
+        }
+        options = [
+            f"Continue reading from line {next_start}",
+            "tail=50 — jump to file end",
+            "head=50 — reread from start",
+        ]
+    return next_call, options
 
 
 # ── Hex Preview ──
@@ -203,7 +306,10 @@ def _read_lines_range(
                 continue
 
             if current_line + 1 > end:
-                total_lines -= 1  # 回退最后一行未返回的计数
+                # 小文件继续精确统计总行数；大文件保持已计数值，由 has_more 表达未读完
+                if file_size <= 1024 * 1024:
+                    for _ in f:
+                        total_lines += 1
                 break
 
             lines.append(line.rstrip('\n').rstrip('\r'))
@@ -498,77 +604,6 @@ def _extract_skeleton(path: str | Path, encoding: str) -> dict[str, Any]:
     }
 
 
-# ── 目录读取 ──
-
-def _read_directory(
-    path: str | Path,
-    recursive: bool = False,
-    max_entries: int = MAX_DIR_ENTRIES,
-    include_hidden: bool = False,
-    max_depth: int = 3,
-    current_depth: int = 0,
-    guard: SymlinkGuard | None = None,
-) -> tuple[list[dict], int, bool]:
-    """读取目录内容。"""
-    p = Path(path)
-    entries = []
-    total_entries = 0
-    if guard is None:
-        guard = SymlinkGuard()
-
-    try:
-        items = list(p.iterdir())
-    except PermissionError:
-        raise PermissionError(f'Permission denied: {path}')
-    except OSError as e:
-        raise OSError(f'Cannot read directory: {path}: {e}')
-
-    if not include_hidden:
-        items = [item for item in items if not item.name.startswith('.')]
-
-    total_entries = len(items)
-    items.sort(key=lambda x: (0 if x.is_dir() else 1, x.name.lower()))
-
-    for item in items[:max_entries]:
-        # symlink 循环检测
-        if guard.is_seen(str(item)):
-            continue
-
-        entry = {
-            'name': item.name,
-            'path': str(item),
-            'type': 'directory' if item.is_dir() else 'file',
-        }
-
-        if item.is_file():
-            stat = item.stat()
-            entry['size'] = stat.st_size
-            entry['human_size'] = human_size(stat.st_size)
-            entry['mtime'] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-
-        if item.is_dir() and recursive and current_depth < max_depth:
-            try:
-                children, child_total, _ = _read_directory(
-                    item,
-                    recursive=True,
-                    max_entries=10,
-                    include_hidden=include_hidden,
-                    max_depth=max_depth,
-                    current_depth=current_depth + 1,
-                    guard=guard,
-                )
-                entry['children'] = children
-                entry['child_count'] = child_total
-            except (PermissionError, OSError):
-                entry['children'] = []
-                entry['child_count'] = 0
-
-        entries.append(entry)
-
-    has_more = len(items) > max_entries
-    return entries, total_entries, has_more
-
-
 # ── 主函数 ──
 
 def read(
@@ -590,22 +625,22 @@ def read(
     include_hidden: bool = False,
 ) -> dict:
     """增强版安全文件读取工具。
-    
+
     Args:
-        path: 文件或目录路径
+        path: 文件路径（目录请使用 dir_list / dir_tree）
         start_line: 起始行号（1-based，0 表示从头）
         end_line: 结束行号（0 表示到末尾）
         max_lines: 最大返回行数
         offset: 字节偏移（hex 模式）
         limit_bytes: 字节限制（hex 模式）
         encoding: 编码：auto / utf-8 / gbk / latin-1
-        mode: 模式：auto / text / binary / hex / skeleton / directory
+        mode: 模式：auto / text / binary / hex / skeleton
         head: 读取前 N 行（优先级高于 start_line/end_line）
         tail: 读取后 N 行（优先级高于 start_line/end_line）
         include_metadata: 是否包含文件元信息
-        recursive: 目录读取时是否递归
-        max_entries: 目录读取时最大条目数
-        include_hidden: 是否包含隐藏文件
+        recursive: 已弃用：目录读取已移除
+        max_entries: 已弃用：目录读取已移除
+        include_hidden: 已弃用：目录读取已移除
     """
     # 0. 路径安全校验（与 safe_write/file_remove 同级）
     forbidden = check_path_allowed(path)
@@ -651,49 +686,28 @@ def read(
             next_call={"tool": "dir_list", "args": {"path": str(p.parent) if p.parent else "."}},
         )
     
-    # 目录读取
+    # 目录读取：不再展开条目，引导到专用工具
     if p.is_dir():
-        if mode == 'auto' or mode == 'directory':
-            try:
-                entries, total_entries, has_more = _read_directory(
-                    p,
-                    recursive=recursive,
-                    max_entries=max_entries,
-                    include_hidden=include_hidden,
-                    max_depth=max_depth,
-                )
-                
-                result = {
-                    'ok': True,
-                    'path': str(p),
-                    'mode': 'directory',
-                    'entries': entries,
-                    'total_entries': total_entries,
-                    'returned_entries': len(entries),
-                    'has_more': has_more,
-                }
-                
-                if include_metadata:
-                    result['metadata'] = _get_metadata(p)
-                
-                return result
-            except Exception as e:
-                return proposal_reply(
-                    False,
-                    f'读取目录失败: {e}',
-                    error=f'Failed to read directory: {e}',
-                    evidence={"path": str(p)},
-                    options=["dir_list", "dir_tree"],
-                )
-        else:
+        if mode in ('binary', 'hex', 'skeleton'):
             return proposal_reply(
                 False,
                 f'路径是目录，无法用 {mode} 模式读取。',
                 error=f'Path is a directory, cannot read as {mode}',
                 evidence={"path": str(p), "mode": mode},
-                options=["directory", "dir_list", "dir_tree"],
-                next_call={"tool": "safe_read", "args": {"path": str(p), "mode": "directory"}},
+                options=["dir_list", "dir_tree"],
             )
+
+        evidence = {"path": str(p), "mode": mode}
+        if include_metadata:
+            evidence["metadata"] = _get_metadata(p)
+        return proposal_reply(
+            False,
+            '路径是目录。使用 dir_list 或 dir_tree 浏览目录内容。',
+            error='Path is a directory',
+            evidence=evidence,
+            options=["dir_list", "dir_tree"],
+            next_call={"tool": "dir_list", "args": {"path": str(p)}},
+        )
     
     if not p.is_file():
         return proposal_reply(
@@ -784,31 +798,18 @@ def read(
         lines, total_lines, has_more = _read_head(p, detected_encoding, head)
         lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
         has_more = has_more or byte_truncated
-        
-        return {
-            'ok': True,
-            'path': str(p),
-            'mode': 'text',
-            'encoding': detected_encoding,
-            'size': file_size,
-            'human_size': metadata.get('human_size', human_size(file_size)),
-            'mime_type': mime_type,
-            'total_lines': total_lines,
-            'returned_lines': len(lines),
-            'start_line': 1,
-            'end_line': len(lines),
-            'has_more': has_more,
-            'content': '\n'.join(lines),
-            'metadata': metadata,
-            'truncated': has_more,
-            'truncation_reason': f'Showing first {len(lines)} of {total_lines} lines' if has_more else '',
-        }
-    
-    if tail > 0:
-        lines, total_lines, start_line, has_more = _read_tail(p, detected_encoding, tail)
-        lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
+
+        content = '\n'.join(lines)
+        content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
+        byte_truncated = byte_truncated or byte_truncated_after
+
+        start_line = 1
+        end_line = len(lines)
         has_more = has_more or byte_truncated
-        
+        next_call, options = _build_next_call_and_options(str(p), start_line, end_line, total_lines, mode="head")
+        header = _build_header(p, total_lines, file_size, detected_encoding, metadata.get('human_size'))
+        footer = _build_footer(start_line, end_line, total_lines, has_more, byte_truncated, mode="head")
+
         return {
             'ok': True,
             'path': str(p),
@@ -820,12 +821,54 @@ def read(
             'total_lines': total_lines,
             'returned_lines': len(lines),
             'start_line': start_line,
-            'end_line': total_lines,
+            'end_line': end_line,
             'has_more': has_more,
-            'content': '\n'.join(lines),
+            'content': content,
+            'header': header,
+            'footer': footer,
+            'metadata': metadata,
+            'truncated': has_more,
+            'truncation_reason': f'Showing first {len(lines)} of {total_lines} lines' if has_more else '',
+            'next_call': next_call,
+            'options': options,
+        }
+    
+    if tail > 0:
+        lines, total_lines, start_line, has_more = _read_tail(p, detected_encoding, tail)
+        lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
+        has_more = has_more or byte_truncated
+
+        content = '\n'.join(lines)
+        content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
+        byte_truncated = byte_truncated or byte_truncated_after
+
+        end_line = total_lines
+        has_more = has_more or byte_truncated
+        next_call, options = _build_next_call_and_options(str(p), start_line, end_line, total_lines, mode="tail")
+        header = _build_header(p, total_lines, file_size, detected_encoding, metadata.get('human_size'))
+        footer = _build_footer(start_line, end_line, total_lines, has_more, byte_truncated, mode="tail")
+
+        return {
+            'ok': True,
+            'path': str(p),
+            'mode': 'text',
+            'encoding': detected_encoding,
+            'size': file_size,
+            'human_size': metadata.get('human_size', human_size(file_size)),
+            'mime_type': mime_type,
+            'total_lines': total_lines,
+            'returned_lines': len(lines),
+            'start_line': start_line,
+            'end_line': end_line,
+            'has_more': has_more,
+            'content': content,
+            'header': header,
+            'footer': footer,
             'metadata': metadata,
             'truncated': has_more,
             'truncation_reason': f'Showing last {len(lines)} of {total_lines} lines' if has_more else '',
+            'next_call': next_call,
+            'options': options,
         }
     
     # 行号范围模式
@@ -834,7 +877,12 @@ def read(
     )
     lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
     has_more = has_more or byte_truncated
-    
+
+    content = '\n'.join(lines)
+    content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
+    byte_truncated = byte_truncated or byte_truncated_after
+    has_more = has_more or byte_truncated
+
     truncated = has_more or (file_size > LARGE_FILE_THRESHOLD) or byte_truncated
     truncation_reason = ''
     if truncated:
@@ -844,8 +892,12 @@ def read(
         else:
             truncation_reason = f'Showing lines {actual_start}-{actual_end} of {total_lines}. Use start_line={actual_end+1} to continue.'
         if byte_truncated:
-            truncation_reason += f' Content truncated to {human_size(MAX_RETURN_BYTES)}.'
-    
+            truncation_reason += f' Content truncated to {human_size(MAX_BYTES_PER_CALL)}.'
+
+    next_call, options = _build_next_call_and_options(str(p), actual_start, actual_end, total_lines, mode="range")
+    header = _build_header(p, total_lines, file_size, detected_encoding, metadata.get('human_size'))
+    footer = _build_footer(actual_start, actual_end, total_lines, has_more, byte_truncated, mode="range")
+
     return {
         'ok': True,
         'path': str(p),
@@ -859,8 +911,12 @@ def read(
         'start_line': actual_start,
         'end_line': actual_end,
         'has_more': has_more,
-        'content': '\n'.join(lines),
+        'content': content,
+        'header': header,
+        'footer': footer,
         'metadata': metadata,
         'truncated': truncated,
         'truncation_reason': truncation_reason,
+        'next_call': next_call,
+        'options': options,
     }
