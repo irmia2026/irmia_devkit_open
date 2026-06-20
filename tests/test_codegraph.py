@@ -204,6 +204,66 @@ class TestCodeGraphExplore:
             os.unlink(path)
 
 
+# ── CodeGraph explore top-source truncation ───────────
+
+
+class TestCodeGraphTopSource:
+    def test_top_symbol_full_source_when_short(self):
+        d = tempfile.mkdtemp()
+        root = Path(d) / "proj"
+        root.mkdir()
+        (root / "small.py").write_text("def small():\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\n")
+        fd, db = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        cg = CodeGraph(db)
+        try:
+            cg.index(str(root))
+            r = cg.explore("small")
+            assert r["found"] is True
+            sym = r["symbols"][0]
+            assert sym["name"] == "small"
+            assert sym["source_truncated"] is False
+            assert sym["total_lines"] == 5
+            assert "next_call" not in sym
+        finally:
+            cg.close()
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+            for f in [db, db + "-shm", db + "-wal"]:
+                try: os.unlink(f)
+                except OSError: pass
+
+    def test_top_symbol_truncated_with_code_pack_hint(self):
+        d = tempfile.mkdtemp()
+        root = Path(d) / "proj"
+        root.mkdir()
+        lines = ["def big():"] + [f"    x{i} = {i}" for i in range(120)] + ["    return x0"]
+        (root / "big.py").write_text("\n".join(lines))
+        fd, db = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        cg = CodeGraph(db)
+        try:
+            cg.index(str(root))
+            r = cg.explore("big")
+            assert r["found"] is True
+            sym = r["symbols"][0]
+            assert sym["name"] == "big"
+            assert sym["source_truncated"] is True
+            assert sym["total_lines"] == 122
+            returned_lines = len(sym["source"].splitlines())
+            assert returned_lines <= 65  # head 40 + tail 20 + 2 marker + 1
+            assert sym.get("next_call") == {"tool": "code_pack", "args": {"target": "big"}}
+            assert "code_pack('big')" in sym.get("options", [])
+            assert "code_pack" in sym.get("footer", "")
+        finally:
+            cg.close()
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+            for f in [db, db + "-shm", db + "-wal"]:
+                try: os.unlink(f)
+                except OSError: pass
+
+
 # ── CodeGraph pack ────────────────────────────────────
 
 

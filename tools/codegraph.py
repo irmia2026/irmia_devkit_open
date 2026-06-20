@@ -46,6 +46,11 @@ _PACK_MAX_LINES = 2000
 _PROGRESS_INTERVAL_FILES = 50
 _STREAM_BATCH_SIZE = 50  # Write to DB every N files to limit memory
 
+# 为搜索结果 TOP 符号展示完整源码时的兜底截断
+_TOP_SOURCE_FULL_LINES = 100
+_TOP_SOURCE_HEAD_LINES = 40
+_TOP_SOURCE_TAIL_LINES = 20
+
 # Worker count for parallel parsing
 _MAX_WORKERS = max(1, min(multiprocessing.cpu_count() // 2, 8))
 
@@ -397,7 +402,8 @@ class CodeGraph:
             name = symbols[i]["name"]
             sr = conn.execute("SELECT source FROM symbols WHERE name=? LIMIT 1", (name,)).fetchone()
             if sr and sr[0]:
-                symbols[i]["source"] = sr[0]
+                top = self._top_source_or_hint(sr[0], name)
+                symbols[i].update(top)
         rmap = self._build_relationship_map(conn, [s["name"] for s in symbols])
         blast = self._build_blast_radius(conn, [s["name"] for s in symbols[:3]])
         grouped = self._build_grouped_by_file(conn, symbols)
@@ -467,7 +473,8 @@ class CodeGraph:
             name = symbols[i]["name"]
             sr = conn.execute("SELECT source FROM symbols WHERE name=? LIMIT 1", (name,)).fetchone()
             if sr and sr[0]:
-                symbols[i]["source"] = sr[0]
+                top = self._top_source_or_hint(sr[0], name)
+                symbols[i].update(top)
         rmap = self._build_relationship_map(conn, [s["name"] for s in symbols])
         grouped = self._build_grouped_by_file(conn, symbols)
 
@@ -477,7 +484,6 @@ class CodeGraph:
                 "search_strategy": strategy}
 
     # ── search engine ─────────────────────────────────
-
     def _search(self, conn, query: str, limit: int = 10) -> tuple[list[dict], str]:
         """三级搜索：LIKE → FTS5 → 无结果提示。支持 kind: 过滤（如 kind:function）。"""
         kind_filter = ""
@@ -650,6 +656,29 @@ class CodeGraph:
         skipped = total - _SOURCE_HEAD_LINES - _SOURCE_TAIL_LINES
         truncated = "\n".join(head) + f"\n... ({skipped} lines skipped) ...\n" + "\n".join(tail)
         return {"source": truncated, "source_truncated": True, "total_lines": total}
+
+    @staticmethod
+    def _top_source_or_hint(source: str, name: str) -> dict:
+        """搜索结果 TOP 符号展示完整源码时的兜底截断，超长时引导 code_pack。"""
+        if not source:
+            return {"source": "", "source_truncated": False, "total_lines": 0}
+        lines = source.split("\n")
+        total = len(lines)
+        if total <= _TOP_SOURCE_FULL_LINES:
+            return {"source": source, "source_truncated": False, "total_lines": total}
+        head = lines[:_TOP_SOURCE_HEAD_LINES]
+        tail = lines[-_TOP_SOURCE_TAIL_LINES:]
+        skipped = total - _TOP_SOURCE_HEAD_LINES - _TOP_SOURCE_TAIL_LINES
+        truncated = "\n".join(head) + f"\n... ({skipped} lines skipped) ...\n" + "\n".join(tail)
+        return {
+            "source": truncated,
+            "source_truncated": True,
+            "total_lines": total,
+            "header": f"符号 '{name}' 源码共 {total} 行，超过 {_TOP_SOURCE_FULL_LINES} 行，已展示 {_TOP_SOURCE_HEAD_LINES} 行头 + {_TOP_SOURCE_TAIL_LINES} 行尾。",
+            "footer": "需要完整源码请调用 code_pack。",
+            "next_call": {"tool": "code_pack", "args": {"target": name}},
+            "options": [f"code_pack('{name}')"],
+        }
 
     # ── code_diff_impact ──────────────────────────────
 
