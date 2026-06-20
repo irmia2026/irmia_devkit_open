@@ -84,12 +84,14 @@ def _parse_rg_with_context(stdout: str) -> list[dict]:
     上下文行: file-line-content（横线分隔）
     """
     matches = []
+    pending_context: list[dict] = []
     current = None
     for line in stdout.split("\n"):
         if not line or line.strip() == "--":
             if current:
                 matches.append(current)
                 current = None
+            pending_context = []
             continue
         m = _RG_CTX_RE.match(line)
         if not m:
@@ -103,10 +105,14 @@ def _parse_rg_with_context(stdout: str) -> list[dict]:
             # This is a match line: file:line:content
             if current:
                 matches.append(current)
-            current = {"file": file, "line": int(lineno), "content": text, "context": []}
+            current = {"file": file, "line": int(lineno), "content": text, "context": list(pending_context)}
+            pending_context = []
         elif current is not None:
-            # Context line: append to current match
+            # Context line after a match: append to current match
             current["context"].append({"line": int(lineno), "content": text})
+        else:
+            # Context line before the first match in a group: buffer it
+            pending_context.append({"line": int(lineno), "content": text})
     if current:
         matches.append(current)
     return matches
@@ -142,7 +148,7 @@ def _python_fallback(
 
     flags = 0 if case_sensitive else re.IGNORECASE
     if whole_word:
-        pattern = rf"\b{re.escape(pattern)}\b"
+        pattern = rf"\b(?:{pattern})\b"
     try:
         compiled = re.compile(pattern, flags)
     except re.error as e:
@@ -247,6 +253,14 @@ def search(
     Returns:
         {"ok": true, "engine": "rg"|"python", "count": N, "matches": [...], ...}
     """
+    if not pattern:
+        return proposal_reply(
+            False,
+            "pattern 不能为空，请输入要搜索的内容",
+            error="empty_pattern",
+            options=["提供非空搜索词"],
+        )
+
     search_path = os.path.abspath(path)
     if not os.path.isdir(search_path):
         return {"ok": False, "error": f"目录不存在: {search_path}"}

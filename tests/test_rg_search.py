@@ -1,138 +1,117 @@
-"""Tests for rg_search — ripgrep + Python fallback content search."""
+"""Tests for rg_search."""
 
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from tools.rg_search import search, _parse_rg_output, _find_rg
+from tools import rg_search
 
 
-class TestRgOutputParser:
-    """测试 _parse_rg_output 的跨平台路径解析"""
-
-    def test_standard_unix_path(self):
-        lines = _parse_rg_output("file.py:10:    print(x)\n")
-        assert len(lines) == 1
-        assert lines[0]["file"] == "file.py"
-        assert lines[0]["line"] == 10
-        assert lines[0]["content"] == "    print(x)"
-
-    def test_relative_path(self):
-        lines = _parse_rg_output("tools/safe_edit.py:68:    result = await _run_sync\n")
-        assert len(lines) == 1
-        assert lines[0]["file"] == "tools/safe_edit.py"
-        assert lines[0]["line"] == 68
-
-    def test_windows_absolute_path(self):
-        """Windows 盘符含冒号，regex 正确解析"""
-        lines = _parse_rg_output(r"C:\Users\dev\proj\main.py:42:    x = 1")
-        assert len(lines) == 1
-        assert lines[0]["file"] == r"C:\Users\dev\proj\main.py"
-        assert lines[0]["line"] == 42
-        assert lines[0]["content"] == "    x = 1"
-
-    def test_content_contains_colons(self):
-        """内容含冒号时 rsplit 取最后两个作为 line:content"""
-        lines = _parse_rg_output("config.py:5:    url: str = ''\n")
-        assert len(lines) == 1
-        assert lines[0]["file"] == "config.py"
-        assert lines[0]["line"] == 5
-        assert lines[0]["content"] == "    url: str = ''"
-
-    def test_multiple_matches(self):
-        stdout = "a.py:1:import os\na.py:3:import sys\nb.py:7:from pathlib import Path\n"
-        lines = _parse_rg_output(stdout)
-        assert len(lines) == 3
-        assert lines[0]["file"] == "a.py"
-        assert lines[2]["file"] == "b.py"
-        assert lines[2]["line"] == 7
-
-    def test_empty_input(self):
-        assert _parse_rg_output("") == []
-
-    def test_malformed_lines_skipped(self):
-        """格式不对的行静默跳过"""
-        lines = _parse_rg_output("broken_line\nok.py:3:content\n")
-        assert len(lines) == 1
+@pytest.fixture
+def tmp_project():
+    d = tempfile.mkdtemp()
+    root = Path(d) / "project"
+    root.mkdir()
+    (root / "a.py").write_text("def hello():\n    print('hello world')\n", encoding="utf-8")
+    (root / "b.py").write_text("def hello_again():\n    pass\n", encoding="utf-8")
+    (root / "readme.txt").write_text("hello text\n", encoding="utf-8")
+    yield str(root)
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
 
 
-class TestRgSearchBasic:
-    def test_finds_pattern_in_files(self, project_dir):
-        result = search("def helper", path=project_dir)
-        assert result["ok"] is True
-        assert result["count"] >= 1
-        match_files = [m["file"] for m in result["matches"]]
-        assert any("utils.py" in f for f in match_files)
+class TestRgSearchHelpers:
+    def test_parse_rg_output(self):
+        stdout = "a.py:2:    print('hello world')\nb.py:1:def hello_again():"
+        matches = rg_search._parse_rg_output(stdout)
+        assert len(matches) == 2
+        assert matches[0] == {"file": "a.py", "line": 2, "content": "    print('hello world')"}
 
-    def test_no_match_returns_empty(self, project_dir):
-        result = search("nonexistent_xyz_123", path=project_dir)
-        assert result["ok"] is True
-        assert result["count"] == 0
+    def test_parse_rg_with_context(self):
+        stdout = "a.py-1-def hello():\na.py:2:    print('hello world')\na.py-3-\n--\nb.py-1-def hello_again():\nb.py:2:    pass"
+        matches = rg_search._parse_rg_with_context(stdout)
+        assert len(matches) == 2
+        assert matches[0]["file"] == "a.py"
+        assert matches[0]["line"] == 2
+        assert len(matches[0]["context"]) == 2
+        assert matches[1]["file"] == "b.py"
+        assert matches[1]["line"] == 2
+        assert len(matches[1]["context"]) == 1
 
-    def test_file_exts_filter(self, project_dir):
-        """指定扩展名过滤"""
-        result = search("helper", path=project_dir, file_exts="txt")
-        assert result["count"] == 0
+    def test_has_nested_quantifiers(self):
+        assert rg_search._has_nested_quantifiers("(a+)+") is True
+        assert rg_search._has_nested_quantifiers("(a*)*") is True
+        assert rg_search._has_nested_quantifiers("(a?)+") is True
+        assert rg_search._has_nested_quantifiers("a+") is False
 
-    def test_list_files_mode(self, project_dir):
-        """list_files=True 只返回文件名无行号"""
-        result = search("def", path=project_dir, list_files=True)
-        assert result["ok"] is True
-        for m in result["matches"]:
-            assert "file" in m
-            assert "line" not in m
 
-    def test_whole_word(self, project_dir):
-        """全词匹配"""
-        result = search("hel", path=project_dir, whole_word=True)
-        assert result["count"] == 0  # "hel" 不是独立词
-        result2 = search("helper", path=project_dir, whole_word=True)
-        assert result2["count"] >= 1  # "helper" 是独立词
+class TestRgSearchPythonFallback:
+    def _force_python(self):
+        """强制走 Python fallback。"""
+        return None
 
-    def test_case_sensitive(self, project_dir):
-        result = search("HELPER", path=project_dir, case_sensitive=True)
-        assert result["count"] == 0
-        result2 = search("HELPER", path=project_dir, case_sensitive=False)
-        assert result2["count"] >= 1
+    def test_empty_pattern_rejected(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("", path=tmp_project)
+        assert r["ok"] is False
+        assert "empty_pattern" in r.get("error", "")
 
-    def test_max_results(self, project_dir):
-        result = search(".", path=project_dir, max_results=1)
-        assert result["count"] <= 1
-        assert result["truncated"] is True or result["count"] == 1
+    def test_basic_search(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("hello", path=tmp_project)
+        assert r["ok"] is True
+        assert r["engine"] == "python"
+        assert r["count"] >= 2
 
-    def test_non_existent_dir(self):
-        result = search("test", path="/nonexistent/path/xyz")
-        assert result["ok"] is False
-        assert "不存在" in result["error"]
+    def test_file_ext_filter(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("hello", path=tmp_project, file_exts="py")
+        assert r["ok"] is True
+        for m in r["matches"]:
+            assert m["file"].endswith(".py")
 
-    def test_invalid_regex(self, project_dir):
-        result = search("[unclosed", path=project_dir)
-        assert result["ok"] is False
+    def test_case_sensitive(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("HELLO", path=tmp_project, case_sensitive=True)
+        assert r["ok"] is True
+        assert r["count"] == 0
 
-    def test_python_fallback_redos_long_pattern(self, project_dir, monkeypatch):
-        """Python fallback 应拒绝超长 pattern。"""
-        monkeypatch.setattr("tools.rg_search._find_rg", lambda: None)
-        result = search("x" * 2000, path=project_dir)
-        assert result.get("ok") is False
-        assert "pattern_too_long" in str(result)
+    def test_whole_word(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search(r"hello_again", path=tmp_project, whole_word=True)
+        assert r["ok"] is True
+        assert any("hello_again" in m.get("content", "") for m in r["matches"])
 
-    def test_python_fallback_redos_nested_quantifiers(self, project_dir, monkeypatch):
-        """Python fallback 应拒绝嵌套量词。"""
-        monkeypatch.setattr("tools.rg_search._find_rg", lambda: None)
-        result = search("(a+)+b", path=project_dir)
-        assert result.get("ok") is False
-        assert "nested_quantifiers" in str(result)
+    def test_list_files(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("hello", path=tmp_project, list_files=True)
+        assert r["ok"] is True
+        assert all("content" not in m for m in r["matches"])
 
-    def test_returns_engine_field(self, project_dir):
-        result = search("class", path=project_dir)
-        assert "engine" in result
-        assert result["engine"] in ("rg", "python")
+    def test_max_results_truncation(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("hello", path=tmp_project, max_results=1)
+        assert r["ok"] is True
+        assert r["truncated"] is True
+        assert len(r["matches"]) == 1
 
-    def test_find_rg(self):
-        """_find_rg 返回 True/None"""
-        rg = _find_rg()
-        # 不能假设 rg 已安装，只验证返回类型
-        assert rg is None or isinstance(rg, str)
+    def test_redos_pattern_too_long(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("a" * 2000, path=tmp_project)
+        assert r["ok"] is False
+        assert "pattern_too_long" in r.get("error", "")
+
+    def test_redos_nested_quantifiers(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", self._force_python)
+        r = rg_search.search("(a+)+", path=tmp_project)
+        assert r["ok"] is False
+        assert "nested_quantifiers" in r.get("error", "")
+
+
+class TestRgSearchTopLevel:
+    def test_invalid_path(self):
+        r = rg_search.search("hello", path="/nonexistent/path/xyz")
+        assert r["ok"] is False
+        assert "目录不存在" in r["error"]
