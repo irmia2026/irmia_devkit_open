@@ -74,7 +74,7 @@ code_index（一次性建索引）
 
 | 意图 | 用这个 |
 |------|--------|
-| 第一次进项目 | `code_index`（全量建索引，后续无需重复调用） |
+| 第一次进项目 | `code_index` 全量建索引；后续文件有改动时 `code_index(incremental=true)` 秒级更新 |
 | 「X 在哪定义」「谁调了 X」 | `code_explore("X")` |
 | 修 X 的 bug，要 X + 依赖链全部源码 | `code_pack("X", depth=2)` |
 | 刚改了文件 Y，会影响什么 | `code_diff_impact(["Y"])` |
@@ -84,7 +84,7 @@ code_index（一次性建索引）
 ### 铁律
 
 1. **图优先** — 能 code_explore 就不要 rg_search
-2. **建索引一次性** — 进项目 `code_index` 全量建索引，后续查符号无需再建
+2. **建索引一次性** — 进项目全量 `code_index`，后续只改了几个文件用 `incremental=true` 增量更新
 3. **失败先查 status** — explore 返回空 → 先 `code_status`，再怀疑查询词
 4. **打包替代多次 explore** — 需要 3+ 符号源码才能理解流程 → 直接 `code_pack`
 5. **改完必查影响** — commit 前 `code_diff_impact`，确认不炸隐藏调用者
