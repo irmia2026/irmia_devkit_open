@@ -4,6 +4,7 @@ _file_utils — 文件读取共享代码。
 """
 
 import difflib
+import hashlib
 import os
 from pathlib import Path
 
@@ -278,6 +279,24 @@ def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -
         except OSError:
             pass
         raise
+
+
+def _first_existing_parent(path: Path) -> Path:
+    """向上查找第一个存在的父目录。"""
+    cur = path
+    while cur and not cur.exists():
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    return cur if cur and cur.exists() else Path.home()
+
+
+def backup_name_stem(p: Path) -> str:
+    """生成包含父目录哈希的备份文件名主干，避免同名不同目录文件混淆。"""
+    parent_str = str(p.parent.resolve()).replace("\\", "/")
+    dir_hash = hashlib.sha256(parent_str.encode("utf-8")).hexdigest()[:8]
+    return f"{p.name}.{dir_hash}"
 
 
 def find_closest_line(content: str, old: str, threshold: float = 0.3) -> dict | None:

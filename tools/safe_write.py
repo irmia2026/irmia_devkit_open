@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, detect_encoding
+from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, detect_encoding, _first_existing_parent, backup_name_stem
 from .safe_edit import _backup_dir
 from .file_remove import _FORBIDDEN_PREFIXES
 
@@ -119,6 +119,15 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
             "error": f"content 超过 20MB 上限（{human_size(content_bytes)}），safe_write 不支持超大文件写入",
         }
 
+    # 检查目标文件所在分区剩余空间（写入实际发生的位置）
+    try:
+        write_dir = p.parent if p.parent.exists() else _first_existing_parent(p.parent)
+        usage = shutil.disk_usage(write_dir)
+        if usage.free < 100 * 1024 * 1024:
+            return {"ok": False, "error": f"目标文件所在分区磁盘空间不足（剩余 {usage.free // 1024 // 1024}MB < 100MB）"}
+    except OSError:
+        pass
+
     # ══════════════════════════════════════════════════════════════
     # 已存在的文件
     # ══════════════════════════════════════════════════════════════
@@ -167,7 +176,7 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
             encoding = "utf-8"
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        backup_path = backup_root / f"{p.name}.{ts}.write.bak"
+        backup_path = backup_root / f"{backup_name_stem(p)}.{ts}.write.bak"
         try:
             shutil.copy2(str(p), str(backup_path))
         except OSError as e:

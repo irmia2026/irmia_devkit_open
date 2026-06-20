@@ -18,6 +18,8 @@ from ._file_utils import (
     align_whitespace,
     check_path_allowed,
     atomic_write_text,
+    _first_existing_parent,
+    backup_name_stem,
 )
 
 
@@ -37,6 +39,18 @@ def _backup_dir() -> Path:
 
 
 def _collect_positions(content: str, old: str) -> list[int]:
+    """收集 old 在 content 中所有非重叠匹配的起始索引。"""
+    positions = []
+    pos = 0
+    while True:
+        idx = content.find(old, pos)
+        if idx == -1:
+            break
+        positions.append(idx)
+        pos = idx + len(old)
+    return positions
+
+
     """收集 old 在 content 中所有非重叠匹配的起始索引。"""
     positions = []
     pos = 0
@@ -89,6 +103,15 @@ def edit(
     if p.stat().st_size > SAFE_EDIT_MAX_SIZE:
         return {"ok": False, "error": "文件超过 20MB 上限，safe_edit 不支持大文件编辑。建议用外部编辑器。"}
 
+    # 检查目标文件所在分区剩余空间（防止备份成功但写入失败）
+    try:
+        write_dir = p.parent if p.parent.exists() else _first_existing_parent(p.parent)
+        usage = shutil.disk_usage(write_dir)
+        if usage.free < 100 * 1024 * 1024:
+            return {"ok": False, "error": f"目标文件所在分区磁盘空间不足（剩余 {usage.free // 1024 // 1024}MB < 100MB）"}
+    except OSError:
+        pass
+
     # 0. 读取文件内容
     try:
         content, encoding = read_file_with_encoding(p)
@@ -97,10 +120,21 @@ def edit(
 
     # 0.1 消歧
     old_count = content.count(old)
+
+    if occurrence < 0:
+        return {"ok": False, "error": "occurrence 不能为负数"}
+    if occurrence > 0 and replace_all:
+        return {
+            "ok": False,
+            "error": "occurrence 与 replace_all 不能同时使用，请只选其一",
+            "proposal": "多匹配时要么用 occurrence=N 指定单次替换，要么用 replace_all=True 替换全部",
+            "options": ["occurrence=N", "replace_all=True"],
+        }
+
     if old_count == 0:
         # P0-1: whitespace-tolerant fallback before giving up
         aligned = align_whitespace(content, old, new)
-        if aligned and not replace_all:
+        if aligned:
             old, new = aligned
             old_count = content.count(old)
             result_extra = {"whitespace_aligned": True}
@@ -159,7 +193,7 @@ def edit(
     except OSError:
         pass  # 无法检测磁盘空间，继续尝试
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = backup_root / f"{p.name}.{ts}.bak"
+    backup_path = backup_root / f"{backup_name_stem(p)}.{ts}.bak"
     try:
         shutil.copy2(filepath, str(backup_path))
     except OSError as e:
@@ -282,7 +316,7 @@ def rollback(filepath: str, backup_name: str = None) -> dict:
             return {"ok": False, "error": f"备份不存在: {backup_name}"}
     else:
         # 找最近的备份
-        pattern = f"{p.name}.*.bak"
+        pattern = f"{backup_name_stem(p)}.*.bak"
         candidates = sorted(_backup_dir().glob(pattern), reverse=True)
         if not candidates:
             return {"ok": False, "error": f"没有找到 {p.name} 的备份"}

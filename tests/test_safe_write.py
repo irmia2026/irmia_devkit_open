@@ -136,3 +136,29 @@ class TestSafeWrite:
         result = write(str(fp), "ok")
         assert result["ok"] is True
         assert fp.exists()
+
+    def test_backup_includes_dir_hash(self, tmp_dir):
+        """相同文件名不同目录的备份不应混淆。"""
+        from tools.config import set_config
+        from tools.safe_edit import edit, rollback
+
+        set_config({"backup_dir": str(Path(tmp_dir) / "backups")})
+        d1 = Path(tmp_dir) / "dir1"
+        d2 = Path(tmp_dir) / "dir2"
+        d1.mkdir()
+        d2.mkdir()
+        f1 = d1 / "same.py"
+        f2 = d2 / "same.py"
+        f1.write_text("x = 1\n")
+        f2.write_text("y = 2\n")
+
+        result1 = edit(str(f1), "x = 1", "x = 10")
+        assert result1["ok"] is True
+        result2 = edit(str(f2), "y = 2", "y = 20")
+        assert result2["ok"] is True
+
+        # rollback f2 不应回滚到 f1 的备份
+        rb = rollback(str(f2))
+        assert rb["ok"] is True
+        assert f2.read_text() == "y = 2\n"
+        assert f1.read_text() == "x = 10\n"

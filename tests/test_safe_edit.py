@@ -114,3 +114,31 @@ class TestSafeEdit:
         result = edit(traversal, "secret", "leaked")
         assert result["ok"] is False
         assert "穿越" in result["error"]
+
+    def test_occurrence_negative_rejected(self, python_file):
+        """occurrence 为负数应被拒绝。"""
+        result = edit(python_file, "x = 1", "x = 42", occurrence=-1)
+        assert result["ok"] is False
+        assert "负数" in result["error"]
+
+    def test_occurrence_replace_all_mutual_exclusive(self, python_file):
+        """occurrence 与 replace_all 不能同时指定。"""
+        result = edit(python_file, "x = 1", "x = 42", occurrence=1, replace_all=True)
+        assert result["ok"] is False
+        assert "不能同时" in result["error"]
+
+    def test_align_whitespace_with_replace_all(self, python_file):
+        """replace_all=True 时也应触发空白对齐 fallback。"""
+        from pathlib import Path
+        import tempfile, os
+
+        fd, path = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)
+        try:
+            Path(path).write_bytes(b"    a = 1\n    b = 1\n")
+            # old 缩进故意少一级
+            result = edit(path, "a = 1\n    b = 1", "a = 2\n    b = 2", replace_all=True)
+            assert result["ok"] is True
+            assert Path(path).read_bytes() == b"    a = 2\n    b = 2\n"
+        finally:
+            os.unlink(path)
