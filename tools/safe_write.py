@@ -18,12 +18,13 @@ safe_write — 新建文件 / 整体覆盖写入工具（safe_edit 的姊妹工�
 做一次精确替换）；不支持二进制（用 http_download 写入下载内容）。
 """
 
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
 
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, detect_encoding, _first_existing_parent, backup_name_stem
+from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem
 from .safe_edit import _backup_dir
 from .file_remove import _FORBIDDEN_PREFIXES
 
@@ -104,6 +105,8 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
         return {"ok": False, "error": "content 不能为 None"}
     if not isinstance(content, str):
         return {"ok": False, "error": f"content 必须是 str 类型，当前为 {type(content).__name__}"}
+    if not filepath or not isinstance(filepath, (str, os.PathLike)):
+        return {"ok": False, "error": "filepath 不能为空"}
 
     raw = str(Path(filepath))
     p = Path(filepath).resolve()
@@ -170,10 +173,9 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
         except OSError:
             pass
 
-        try:
-            encoding = detect_encoding(p)
-        except Exception:
-            encoding = "utf-8"
+        # content 来自 LLM（Unicode str），始终以 UTF-8 写入。
+        # 不沿用旧文件编码——如果旧文件是 GBK 而新内容含 emoji，会乱码或抛 UnicodeError。
+        encoding = "utf-8"
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup_path = backup_root / f"{backup_name_stem(p)}.{ts}.write.bak"

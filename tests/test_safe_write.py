@@ -162,3 +162,18 @@ class TestSafeWrite:
         assert rb["ok"] is True
         assert f2.read_text() == "y = 2\n"
         assert f1.read_text() == "x = 10\n"
+
+    def test_overwrite_gbk_file_with_emoji(self, tmp_dir):
+        """overwrite GBK 旧文件时新内容应始终以 UTF-8 写入，emoji 不丢失。"""
+        f = Path(tmp_dir) / "old_gbk.py"
+        f.write_bytes('x = 1'.encode("gbk"))
+        result = write(str(f), "x = 2  # \U0001f389\n", overwrite=True)
+        assert result["ok"] is True
+        final_bytes = f.read_bytes()
+        assert b"\xf0\x9f\x8e\x89" in final_bytes  # emoji UTF-8 编码
+
+    def test_filepath_none_rejected(self, tmp_dir):
+        """filepath=None 应返回友好错误而非 TypeError。"""
+        result = write(None, "hello")
+        assert result["ok"] is False
+        assert "filepath" in result["error"]
