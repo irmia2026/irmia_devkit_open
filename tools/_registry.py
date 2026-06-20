@@ -1763,7 +1763,7 @@ FileRemoveTool = make_tool(
 
 CodeIndexTool = make_tool(
     "code_index",
-    "【首次使用必调】为项目建立代码语义索引（符号+调用关系图）。Python 零依赖；其他语言需 pip install tree-sitter + grammar。索引存储为 .codegraph/codegraph.db。增量模式按 mtime 跳过未改文件。建完之后用 code_explore 回答一切代码结构问题——不要再手动 rg_search+file_read 拼答案。",
+    "建索引—后续所有符号/调用链查询秒回。一次性投入 3–15s，免去反复 safe_read+rg_search 拼答案的分钟级耗时。索引在 .codegraph/codegraph.db，支持增量（跳过未改文件）。",
     {
         "type": "object",
         "properties": {
@@ -1778,7 +1778,7 @@ CodeIndexTool = make_tool(
 
 CodeExploreTool = make_tool(
     "code_explore",
-    "【代码结构问题首选——一次调用即答案】回答一切代码库结构问题：符号搜索（'safe_edit 在哪'）、调用链追踪（'从 load 到 add_llm_tools'）、架构理解（'star_manager 怎么加载插件'）。返回结构化 JSON + 自然语言总结。**先调我**——查不到时看 hint 改进查询；若符号确实不在索引中（日志文本、配置值、注释关键词），fallback 到 rg_search。需要先运行 code_index 建索引。",
+    "🔍 符号/调用链秒查。问「X 在哪」「谁调了 X」「从 A 到 B 的链路」一句话即得结构化答案。前提：先跑 code_index。查不到时看 hint 改进查询词；若符号是日志文本/配置值/注释关键词则 fallback rg_search。",
     {
         "type": "object",
         "properties": {
@@ -1793,7 +1793,7 @@ CodeExploreTool = make_tool(
 
 CodeDiffImpactTool = make_tool(
     "code_diff_impact",
-    "【变更影响分析 + multi_edit 上游】追踪变更波及的文件和符号。适合 commit 前检查影响范围；结果可直接构建 edits 列表喂给 multi_edit 做批量原子编辑。不适合：查单个函数的调用者（用 code_explore）。BFS 追踪调用者链，max_depth 控制深度（默认 3）。",
+    "📊 改代码前必查——谁调了你改的符号？BFS 追踪调用者链（max_depth 默认 3）。结果可直接构造成 edits 列表喂给 multi_edit 批量原子修。不适合查单个符号定义（用 code_explore）。",
     {
         "type": "object",
         "properties": {
@@ -1809,7 +1809,7 @@ CodeDiffImpactTool = make_tool(
 
 CodePackTool = make_tool(
     "code_pack",
-    "【精准上下文打包】以符号为起点收集 N 层调用链源码。适合修 bug 前需要完整上下文。不适合：查符号在哪定义（用 code_explore）。mode 可选 callers/callees/both，depth 控制展开层数（默认 2），上限 2000 行。",
+    "📦 修 bug 前拿 N 层调用链源码打包。以符号为起点按 callers/callees/both 展开（depth 默认 2），上限 2000 行。不适合查符号定义（用 code_explore，更快）。",
     {
         "type": "object",
         "properties": {
@@ -1826,7 +1826,7 @@ CodePackTool = make_tool(
 
 CodeStatusTool = make_tool(
     "code_status",
-    "【索引健康检查】查看索引覆盖范围和状态。适合 code_explore 查不到时排障。不适合：索引正常时调它——直接调 code_explore。返回文件数、符号数、边数、上次索引时间、DB 大小、FTS5 状态、缺失的 grammar。",
+    "🩺 索引健康检查——code_explore 查不到时调我排障。返回文件数/符号数/边数/上次索引时间/DB 大小/缺失的 grammar。索引正常时直接调 code_explore。",
     {
         "type": "object",
         "properties": {
@@ -1840,7 +1840,7 @@ CodeStatusTool = make_tool(
 
 SymbolRenameTool = make_tool(
     "symbol_rename",
-    "Python 符号重命名。要求先运行 code_index；默认 dry_run 预览。只替换 Python NAME token，不替换字符串和注释；dry_run=false 时通过 multi_edit 原子应用。多文件重命名（>1 文件）需 confirm_multi_file=true 才能执行，先用 dry_run 审查预览 diff。",
+    "Python 符号重命名。只替换 Python NAME token（不碰字符串/注释），默认 dry_run 预览。需先跑 code_index。dry_run=false 时通过 multi_edit 原子应用；多文件重命名需 confirm_multi_file=true 确认。",
     {
         "type": "object",
         "properties": {
