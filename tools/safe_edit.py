@@ -28,7 +28,7 @@ def _backup_dir() -> Path:
     config = get_config()
     custom = config.get("backup_dir", "")
     if custom:
-        return Path(custom)
+        return Path(custom).resolve()
     default = Path.home() / ".irmia" / "backups"
     try:
         default.parent.mkdir(parents=True, exist_ok=True)
@@ -282,7 +282,7 @@ def edit(
     return result
 
 
-def list_backups(filepath: str = None) -> dict:
+def list_backups(filepath: str | None = None) -> dict:
     """列出备份文件。"""
     _backup_dir().mkdir(parents=True, exist_ok=True)
     backups = []

@@ -492,6 +492,21 @@ class TestFileReadValidation:
         assert result["ok"] is False
         assert "mode" in result["error"].lower()
 
+    def test_start_line_beyond_eof(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("line1\nline2\nline3\n")
+        result = safe_read.read(str(f), start_line=100)
+        assert result["ok"] is False
+        assert "超过" in result["error"]
+        assert result["next_call"]["args"]["tail"] == 3
+
+    def test_invalid_line_range(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("line1\nline2\nline3\n")
+        result = safe_read.read(str(f), start_line=10, end_line=5)
+        assert result["ok"] is False
+        assert "end_line" in result["error"]
+
 
 class TestFileReadHeadPerformance:
     """head 模式不应扫描整个大文件。"""

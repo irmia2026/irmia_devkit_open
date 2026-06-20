@@ -363,7 +363,7 @@ def _read_head(
                     break
 
     if has_more and file_size > _SMALL_FILE_THRESHOLD:
-        total_lines = max(n_lines + 1, _estimate_line_count(p, file_size))
+        total_lines = max(n_lines + 1, _estimate_line_count(p, file_size, encoding))
 
     return lines, total_lines, has_more
 
@@ -420,7 +420,7 @@ def _read_tail(
             buffer.appendleft(partial.decode(encoding, errors="replace"))
 
         # 统计总行数：只在文件不大时精确计算，否则估算
-        total_lines = _estimate_line_count(p, size) if size > _SMALL_FILE_THRESHOLD else _count_lines_exact(p, encoding)
+        total_lines = _estimate_line_count(p, size, encoding) if size > _SMALL_FILE_THRESHOLD else _count_lines_exact(p, encoding)
 
     lines = list(buffer)
     start_line = max(1, total_lines - len(lines) + 1)
@@ -428,13 +428,13 @@ def _read_tail(
     return lines, total_lines, start_line, has_more
 
 
-def _estimate_line_count(path: str | Path, size: int) -> int:
-    """基于文件大小和采样估算行数（用于超大文件 tail）。"""
+def _estimate_line_count(path: str | Path, size: int, encoding: str = "utf-8") -> int:
+    """基于文件大小和采样估算行数（用于超大文件 tail/head）。"""
     p = Path(path)
     sample_size = min(8192, size)
     if sample_size == 0:
         return 0
-    with p.open("r", encoding="utf-8", errors="replace") as f:
+    with p.open("r", encoding=encoding, errors="replace") as f:
         sample = f.read(sample_size)
     avg_line = len(sample.splitlines()) / max(len(sample), 1)
     if avg_line == 0:
@@ -915,11 +915,32 @@ def read(
         }
     
     # 行号范围模式
+    if end_line > 0 and start_line > 0 and end_line < start_line:
+        return proposal_reply(
+            False,
+            f"end_line({end_line}) 不能小于 start_line({start_line})",
+            error=f"行号范围非法: end_line({end_line}) < start_line({start_line})",
+            evidence={"start_line": start_line, "end_line": end_line},
+            options=["检查行号范围"],
+        )
+
     lines, actual_start, actual_end, total_lines, has_more = _read_lines_range(
         p, detected_encoding, start_line, end_line, max_lines
     )
     lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
     has_more = has_more or byte_truncated
+
+    # start_line 超过 EOF 时给出明确错误与导航
+    if start_line > 0 and actual_start == 0 and total_lines > 0 and not lines:
+        tail_n = min(MAX_LINES_PER_CALL, total_lines)
+        return proposal_reply(
+            False,
+            f"start_line={start_line} 超过文件总行数 {total_lines}，无法读取。",
+            error="start_line 超过文件总行数",
+            evidence={"start_line": start_line, "total_lines": total_lines},
+            options=[f"tail={tail_n}", "head=50"],
+            next_call={"tool": "safe_read", "args": {"path": str(p), "tail": tail_n}},
+        )
 
     content = '\n'.join(lines)
     content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
