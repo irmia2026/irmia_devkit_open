@@ -77,3 +77,40 @@ class TestSafeEdit:
         result = edit(python_file, "a", "x", occurrence=5)
         assert result["ok"] is False
         assert "超过" in result["error"]
+
+    def test_preserves_crlf(self, python_file):
+        """编辑后应保留原始 CRLF 换行符。"""
+        Path(python_file).write_bytes(b"x = 1\r\ny = 2\r\n")
+        result = edit(python_file, "x = 1", "x = 42")
+        assert result["ok"] is True
+        content = Path(python_file).read_bytes()
+        assert b"\r\n" in content
+        assert b"\n" not in content.replace(b"\r\n", b"")
+
+    def test_replace_all_preserves_crlf(self, python_file):
+        Path(python_file).write_bytes(b"x = 1\r\ny = 1\r\n")
+        result = edit(python_file, "= 1", "= 2", replace_all=True)
+        assert result["ok"] is True
+        content = Path(python_file).read_bytes()
+        assert content == b"x = 2\r\ny = 2\r\n"
+
+    def test_occurrence_preserves_crlf(self, python_file):
+        Path(python_file).write_bytes(b"x = 1\r\ny = 1\r\nz = 1\r\n")
+        result = edit(python_file, "= 1", "= 2", occurrence=2)
+        assert result["ok"] is True
+        content = Path(python_file).read_bytes()
+        assert content == b"x = 1\r\ny = 2\r\nz = 1\r\n"
+
+    def test_path_sandbox_rejects_system(self, python_file):
+        """尝试编辑系统目录文件应被沙箱拒绝。"""
+        result = edit("C:/Windows/System32/notepad.exe", "old", "new")
+        assert result["ok"] is False
+        assert "禁止" in result["error"] or "系统目录" in result["error"]
+
+    def test_path_sandbox_rejects_traversal(self, python_file):
+        """路径穿越应被拒绝。"""
+        base = Path(python_file).parent
+        traversal = f"{base}/subdir/../../{base.name}/secret.txt"
+        result = edit(traversal, "secret", "leaked")
+        assert result["ok"] is False
+        assert "穿越" in result["error"]

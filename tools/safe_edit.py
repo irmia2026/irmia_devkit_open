@@ -11,7 +11,14 @@ from pathlib import Path
 from .config import get_config, get_plugin_dir
 from .file_patch import patch
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, find_closest_line, SAFE_EDIT_MAX_SIZE, align_whitespace
+from ._file_utils import (
+    read_file_with_encoding,
+    find_closest_line,
+    SAFE_EDIT_MAX_SIZE,
+    align_whitespace,
+    check_path_allowed,
+    atomic_write_text,
+)
 
 
 def _backup_dir() -> Path:
@@ -66,11 +73,18 @@ def edit(
     if not old:
         return {"ok": False, "error": "old 参数不能为空字符串，空替换会损毁文件"}
 
+    safety = check_path_allowed(filepath)
+    if safety:
+        return safety
+
     p = Path(filepath).resolve()
     filepath = str(p)
 
     if not p.exists():
         return {"ok": False, "error": f"文件不存在: {filepath}"}
+
+    if not p.is_file():
+        return {"ok": False, "error": f"路径不是文件: {filepath}"}
 
     if p.stat().st_size > SAFE_EDIT_MAX_SIZE:
         return {"ok": False, "error": "文件超过 20MB 上限，safe_edit 不支持大文件编辑。建议用外部编辑器。"}
@@ -164,9 +178,8 @@ def edit(
         idx = positions[occurrence - 1]
         content = content[:idx] + new + content[idx + len(old) :]
         try:
-            with open(filepath, "w", encoding=encoding, newline="") as f:
-                f.write(content)
-        except OSError as e:
+            atomic_write_text(filepath, content, encoding)
+        except (OSError, UnicodeError) as e:
             return {"ok": False, "error": f"无法写入文件：{e}"}
         result["replaced"] = 1
         result["occurrence"] = occurrence
@@ -178,6 +191,8 @@ def edit(
                 "ok": False,
                 "error": patch_result.get("error", "patch 失败"),
                 "rolled_back": False,
+                "proposal": f"备份保留在 {backup_path}，可手动恢复或调用 rollback",
+                "options": ["rollback", "restore_backup"],
             }
         result["replaced"] = patch_result.get("replaced", 0)
 
@@ -194,7 +209,7 @@ def edit(
             else:
                 try:
                     shutil.copy2(str(backup_path), filepath)
-                except OSError as e:
+                except (OSError, UnicodeError) as e:
                     return {
                         **result,
                         "ok": False,

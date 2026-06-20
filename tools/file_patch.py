@@ -7,7 +7,7 @@ file_patch — 精确文本替换工具。
 import difflib
 from pathlib import Path
 
-from ._file_utils import read_file, read_file_with_encoding, find_closest_line, align_whitespace
+from ._file_utils import read_file, read_file_with_encoding, find_closest_line, align_whitespace, atomic_write_text
 
 
 def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
@@ -36,54 +36,57 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
     except Exception as e:
         return {"ok": False, "error": f"无法读取文件: {e}"}
 
-    if old not in content:
-        # P0-1: whitespace-tolerant fallback before giving up
-        aligned = align_whitespace(content, old, new)
-        if aligned:
-            aligned_old, aligned_new = aligned
-            count = content.count(aligned_old)
-            new_content = content.replace(aligned_old, aligned_new) if replace_all else content.replace(aligned_old, aligned_new, 1)
-            actual_replaced = 1 if not replace_all else count
-            p.write_text(new_content, encoding=encoding, newline="")
+    try:
+        if old not in content:
+            # P0-1: whitespace-tolerant fallback before giving up
+            aligned = align_whitespace(content, old, new)
+            if aligned:
+                aligned_old, aligned_new = aligned
+                count = content.count(aligned_old)
+                new_content = content.replace(aligned_old, aligned_new) if replace_all else content.replace(aligned_old, aligned_new, 1)
+                actual_replaced = 1 if not replace_all else count
+                atomic_write_text(p, new_content, encoding)
+                return {
+                    "ok": True,
+                    "replaced": actual_replaced,
+                    "total_occurrences": count,
+                    "replace_all": replace_all,
+                    "file": str(p.absolute()),
+                    "whitespace_aligned": True,
+                    "aligned_old": aligned_old[:80],
+                }
+            # Still not found — give closest line hint
+            closest = find_closest_line(content, old)
+            hint = f" 最接近的行 #{closest['line']}: {closest['text']}" if closest else ""
             return {
-                "ok": True,
-                "replaced": actual_replaced,
-                "total_occurrences": count,
-                "replace_all": replace_all,
-                "file": str(p.absolute()),
-                "whitespace_aligned": True,
-                "aligned_old": aligned_old[:80],
+                "ok": False,
+                "error": f"旧文本在文件中未找到。{hint}",
+                "hint": "检查 old 参数是否包含完整且精确的文本片段。",
             }
-        # Still not found — give closest line hint
-        closest = find_closest_line(content, old)
-        hint = f" 最接近的行 #{closest['line']}: {closest['text']}" if closest else ""
-        return {
-            "ok": False,
-            "error": f"旧文本在文件中未找到。{hint}",
-            "hint": "检查 old 参数是否包含完整且精确的文本片段。",
-        }
 
-    count = content.count(old)
-    new_content = (
-        content.replace(old, new) if replace_all else content.replace(old, new, 1)
-    )
-    actual_replaced = 1 if not replace_all else count
-
-    p.write_text(new_content, encoding=encoding, newline="")
-
-    result = {
-        "ok": True,
-        "replaced": actual_replaced,
-        "total_occurrences": count,
-        "replace_all": replace_all,
-        "file": str(p.absolute()),
-    }
-    if not replace_all and count > 1:
-        result["proposal"] = (
-            f"仅替换了第1次出现(共{count}处)。设 replace_all=True 替换全部。"
+        count = content.count(old)
+        new_content = (
+            content.replace(old, new) if replace_all else content.replace(old, new, 1)
         )
-        result["options"] = ["replace_all=True", "逐个替换"]
-    return result
+        actual_replaced = 1 if not replace_all else count
+
+        atomic_write_text(p, new_content, encoding)
+
+        result = {
+            "ok": True,
+            "replaced": actual_replaced,
+            "total_occurrences": count,
+            "replace_all": replace_all,
+            "file": str(p.absolute()),
+        }
+        if not replace_all and count > 1:
+            result["proposal"] = (
+                f"仅替换了第1次出现(共{count}处)。设 replace_all=True 替换全部。"
+            )
+            result["options"] = ["replace_all=True", "逐个替换"]
+        return result
+    except (OSError, UnicodeError) as e:
+        return {"ok": False, "error": f"无法写入文件: {e}"}
 
 
 def preview(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:

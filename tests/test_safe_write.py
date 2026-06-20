@@ -114,3 +114,25 @@ class TestSafeWrite:
         result = write(str(fp), "x" * (21 * 1024 * 1024))
         assert result["ok"] is False
         assert "20MB" in result.get("error", "")
+
+    def test_content_type_invalid(self, tmp_dir):
+        """content 非 str 应友好报错"""
+        fp = Path(tmp_dir) / "bytes.txt"
+        result = write(str(fp), b"bytes content")
+        assert result["ok"] is False
+        assert "str" in result.get("error", "")
+
+    def test_preserves_crlf(self, tmp_dir):
+        """overwrite=True 时应保留已有 CRLF（读取阶段不再转换）。"""
+        fp = Path(tmp_dir) / "crlf.txt"
+        fp.write_bytes(b"line1\r\nline2\r\n")
+        result = write(str(fp), "line1\r\nline2\r\nmodified\r\n", overwrite=True)
+        assert result["ok"] is True
+        assert fp.read_bytes() == b"line1\r\nline2\r\nmodified\r\n"
+
+    def test_dotdot_in_filename_allowed(self, tmp_dir):
+        """文件名中合法包含 .. 子串不应被拒绝。"""
+        fp = Path(tmp_dir) / "foo..bar.txt"
+        result = write(str(fp), "ok")
+        assert result["ok"] is True
+        assert fp.exists()

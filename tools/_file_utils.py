@@ -225,10 +225,11 @@ def check_path_allowed(path: str | Path) -> dict | None:
 
 
 def read_file(path: str | Path, *, encoding: str = "auto") -> str:
-    """读取文件内容。编码 auto 时自动检测，否则使用指定编码。"""
+    """读取文件内容。编码 auto 时自动检测，否则使用指定编码。保留原始换行符。"""
     p = Path(path)
     enc = detect_encoding(p) if encoding == "auto" else encoding
-    return p.read_text(encoding=enc, errors="replace")
+    with p.open("r", encoding=enc, errors="replace", newline="") as f:
+        return f.read()
 
 
 def read_file_with_encoding(
@@ -237,12 +238,12 @@ def read_file_with_encoding(
     encoding: str = "auto",
     max_bytes: int | None = None,
 ) -> tuple[str, str]:
-    """读取文件内容，同时返回检测到的编码。"""
+    """读取文件内容，同时返回检测到的编码。保留原始换行符。"""
     p = Path(path)
     enc = detect_encoding(p) if encoding == "auto" else encoding
-    if max_bytes is None:
-        return p.read_text(encoding=enc, errors="replace"), enc
-    with p.open("r", encoding=enc, errors="replace") as f:
+    with p.open("r", encoding=enc, errors="replace", newline="") as f:
+        if max_bytes is None:
+            return f.read(), enc
         return f.read(max_bytes), enc
 
 
@@ -254,6 +255,29 @@ def human_size(n: int) -> str:
             return s.replace(".0", "") if ".0" in s else s
         n /= 1024
     return f"{n:.1f}PB"
+
+
+def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -> None:
+    """原子写入文本文件：先写同目录临时文件，再 os.replace 替换目标文件。
+
+    保留原始换行符（调用方需确保 content 中的换行符已是期望形式）。
+    """
+    import os as _os
+    import tempfile as _tmp
+
+    target = Path(path)
+    fd, tmp_path = _tmp.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    tmp = Path(tmp_path)
+    try:
+        with _os.fdopen(fd, "w", encoding=encoding, newline="") as f:
+            f.write(content)
+        _os.replace(str(tmp), str(target))
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def find_closest_line(content: str, old: str, threshold: float = 0.3) -> dict | None:

@@ -6,9 +6,11 @@ syntax_check — 语法检查工具。
 import subprocess
 import ast
 import sys
+import tokenize
 from pathlib import Path
 
 from ._helpers import proposal_reply
+from ._file_utils import detect_encoding
 
 
 def check(filepath: str) -> dict:
@@ -43,15 +45,26 @@ def check(filepath: str) -> dict:
 def _check_python(p: Path) -> dict:
     """Python 语法检查：先用 ast.parse（无副作用），失败则用 py_compile。"""
     try:
-        source = p.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
+        with tokenize.open(p) as f:
+            source = f.read()
+    except (UnicodeDecodeError, SyntaxError):
+        # tokenize.open 默认 UTF-8；若失败，尝试自动探测编码（兼容无 cookie 的 GBK 等）
         try:
-            source = p.read_text(encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            try:
-                source = p.read_text(encoding="latin-1")
-            except Exception:
-                source = p.read_text(encoding="utf-8", errors="replace")
+            enc = detect_encoding(p)
+            with p.open("r", encoding=enc, errors="replace", newline="") as f:
+                source = f.read()
+        except Exception as e:
+            return {
+                "ok": False,
+                "language": "python",
+                "error": f"无法读取或解码文件: {e}",
+            }
+    except Exception as e:
+        return {
+            "ok": False,
+            "language": "python",
+            "error": f"无法读取或解码文件: {e}",
+        }
 
     try:
         ast.parse(source)
