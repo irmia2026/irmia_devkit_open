@@ -18,6 +18,11 @@ def record(name: str) -> None:
         pass
 
 
+def reset() -> None:
+    """清空所有统计数据（用于测试隔离）。"""
+    _stats.clear()
+
+
 def snapshot() -> dict:
     return {
         "ok": True,

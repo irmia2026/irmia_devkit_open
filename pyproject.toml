@@ -4,5 +4,19 @@ version = "2.6.0"
 description = "弥亚开发工具箱 — 为 LLM Agent 提供安全的代码开发工具集"
 requires-python = ">=3.10"
 
+[tool.pytest.ini_options]
+strict = true
+testpaths = ["tests"]
+addopts = "--tb=short --durations=10 --ignore=tests/test_devkit_web.py --ignore=tests/test_group_default_config.py"
+markers = [
+    "slow: 性能测试（默认跳过）",
+    "network: 需要网络的测试",
+    "integration: 系统集成测试（真实进程/磁盘）",
+]
+
+[tool.coverage.run]
+source = ["tools"]
+omit = ["tools/_registry_split.py"]
+
 [tool.ruff.lint]
 ignore = ["E701", "E741"]

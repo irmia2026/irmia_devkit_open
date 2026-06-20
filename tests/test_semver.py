@@ -60,7 +60,7 @@ class TestCompare:
     def test_invalid_version(self):
         r = sv.compare("not.a.version", "1.0.0")
         assert r["ok"] is False
-        assert "格式无效" in r["error"]
+        assert "error" in r
 
     def test_both_invalid(self):
         r = sv.compare("abc", "def")

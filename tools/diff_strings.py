@@ -15,6 +15,8 @@ def diff(a: str, b: str, context_lines: int = 3, max_lines: int = 100) -> dict:
         context_lines: 差异周围的上下文行数
         max_lines: 最大输出 diff 行数（超过截断）
     """
+    if not isinstance(a, str) or not isinstance(b, str):
+        return {"ok": False, "error": "输入必须是字符串"}
     a_lines = a.splitlines(keepends=True)
     b_lines = b.splitlines(keepends=True)
 

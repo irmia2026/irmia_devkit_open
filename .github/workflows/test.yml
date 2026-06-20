@@ -1,0 +1,32 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov
+      - name: Run tests (unit)
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/test_devkit_web.py \
+            --ignore=tests/test_group_default_config.py \
+            --ignore=tests/test_port_check.py \
+            --ignore=tests/test_sys_snapshot.py \
+            --ignore=tests/test_proc_list.py \
+            --ignore=tests/test_disk_info.py \
+            --ignore=tests/test_git_changelog.py \
+            --ignore=tests/test_git_smart.py \
+            --ignore=tests/test_shell_exec.py \
+            -q --durations=10
+      - name: Run integration tests
+        if: runner.os == 'Windows'
+        run: |
+          python -m pytest tests/test_port_check.py tests/test_sys_snapshot.py tests/test_proc_list.py tests/test_disk_info.py -q

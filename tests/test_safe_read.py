@@ -534,3 +534,22 @@ class TestFindClosestLineIndent:
         content = "    def foo():\n        pass\n"
         closest = find_closest_line(content, "def foo")
         assert closest["text"].startswith("    ")
+
+
+@pytest.mark.slow
+class TestPerf:
+    """性能回归测试（默认跳过，用 -m slow 运行）。"""
+
+    def test_large_file_head_fast(self, tmp_dir) -> None:
+        """~9MB 文件的读取应在 1s 内完成。"""
+        import time
+        f = Path(tmp_dir) / "large.log"
+        # Write ~7MB of text
+        with open(f, "w", encoding="utf-8") as fh:
+            for i in range(200_000):
+                fh.write(f"line {i}\n")
+        t0 = time.time()
+        result = safe_read.read(str(f), mode="auto", max_lines=10)
+        elapsed = time.time() - t0
+        assert result["ok"] is True, f"result={result.get('error')}"
+        assert elapsed < 1.0, f"read took {elapsed:.2f}s"
