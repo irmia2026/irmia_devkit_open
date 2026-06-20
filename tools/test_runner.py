@@ -14,12 +14,7 @@ from pathlib import Path
 from .shell_exec import split_command, validate_command
 
 
-_PYTEST_SUMMARY_RE = re.compile(
-    r"(?:(?P<failed>\d+)\s+failed)?(?:,\s*)?"
-    r"(?:(?P<passed>\d+)\s+passed)?(?:,\s*)?"
-    r"(?:(?P<skipped>\d+)\s+skipped)?",
-    re.IGNORECASE,
-)
+
 
 
 def _resolve_project_dir(filepath: str = "", project_dir: str = ".") -> Path:

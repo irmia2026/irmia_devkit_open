@@ -100,7 +100,10 @@ def generate(rows: list[dict], delimiter: str = ",") -> dict:
         output, fieldnames=headers, delimiter=delimiter, lineterminator="\n"
     )
     writer.writeheader()
-    writer.writerows(rows)
+    try:
+        writer.writerows(rows)
+    except ValueError as e:
+        return {"ok": False, "error": f"CSV 生成失败（键不一致或无数据）: {e}"}
 
     return {
         "ok": True,

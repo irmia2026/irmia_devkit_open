@@ -37,7 +37,7 @@ def query(data: str, path: str) -> dict:
     try:
         result = _resolve(obj, path, 0)
         return {"ok": True, "path": path, "result": result}
-    except (KeyError, IndexError, TypeError, ValueError) as e:
+    except (KeyError, IndexError, TypeError, ValueError, RecursionError) as e:
         return proposal_reply(
             False,
             f"路径 '{path}' 解析失败——对象结构不匹配路径",
@@ -52,6 +52,8 @@ def _resolve(obj, path: str, depth: int = 0):
         raise RecursionError("JSON 路径深度超过上限 (50)")
     if not path:
         return obj
+    if not isinstance(path, str):
+        raise ValueError(f"路径必须是字符串")
     import re
 
     if path.startswith("["):

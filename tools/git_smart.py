@@ -3,6 +3,7 @@ git_smart — Git 操作封装。
 常用 git 命令的结构化输出。不要用 shell 直接执行 git 命令——用此工具。
 """
 
+import os
 import re
 
 from ._helpers import proposal_reply, _run_cmd
@@ -12,7 +13,8 @@ _RE_STAT = re.compile(r"(\d+)\s+files?\s+changed(?:,\s+(\d+)\s+insertions?\(\+\)
 
 
 def _run_git(cwd: str, args: list[str], timeout: int = 15) -> dict:
-    return _run_cmd(["git"] + args, cwd=cwd, timeout=timeout)
+    git_env = os.environ | {"LC_ALL": "C"}
+    return _run_cmd(["git"] + args, cwd=cwd, timeout=timeout, env=git_env)
 
 
 def status(cwd: str) -> dict:
@@ -21,9 +23,10 @@ def status(cwd: str) -> dict:
     if not r["ok"]:
         return r
     lines = r["stdout"].split("\n") if r["stdout"] else []
+    clean = len(lines) == 0 or all(l == "" for l in lines)
     return {
         "ok": True,
-        "clean": len(lines) == 0 or (len(lines) == 1 and lines[0] == ""),
+        "clean": clean,
         "changes": [line for line in lines if line.strip()],
         "changed_count": len([l for l in lines if l.strip()]),
     }
@@ -72,6 +75,8 @@ def diff(cwd: str, staged: bool = False, filepath: str = None) -> dict:
 
 def log(cwd: str, count: int = 5) -> dict:
     """查看最近提交记录。上限 30 条。"""
+    if not isinstance(count, int) or count < 1:
+        return {"ok": False, "error": "count 必须为正整数"}
     count = min(count, 30)
     r = _run_git(cwd, ["log", f"-{count}", "--oneline", "--decorate"])
     if not r["ok"]:
@@ -87,11 +92,17 @@ def commit(cwd: str, message: str) -> dict:
     if s.get("clean"):
         return {"ok": False, "error": "没有可提交的更改"}
 
+    message = message.strip()
+    if not message:
+        return {"ok": False, "error": "提交消息不能为空"}
+
     changed = s.get("changed_count", 0)
     if changed > 10:
         groups = {"Python": [], "Config": [], "Other": []}
         for f_line in s.get("changes", []):
-            f_name = f_line.split()[-1] if len(f_line.split()) > 2 else f_line.strip()
+            # 解析 git status --porcelain 行：前两位是状态码，第3位起是文件名
+            f_name = f_line[3:] if len(f_line) > 3 and f_line[2] == ' ' else f_line.strip()
+            f_name = f_name.strip()
             if f_name.endswith((".py", ".nim", ".go")):
                 groups["Python"].append(f_name)
             elif f_name.endswith((".json", ".yaml", ".yml", ".toml", ".cfg", ".ini")):
@@ -111,11 +122,11 @@ def commit(cwd: str, message: str) -> dict:
 
     r1 = _run_git(cwd, ["add", "-A"])
     if not r1["ok"]:
-        return {"ok": False, "error": f"git add 失败: {r1['stderr']}"}
+        return {"ok": False, "error": f"git add 失败: {r1.get('stderr', r1.get('error', ''))}"}
 
     r2 = _run_git(cwd, ["commit", "-m", message], timeout=30)
     if not r2["ok"]:
-        return {"ok": False, "error": f"git commit 失败: {r2['stderr']}"}
+        return {"ok": False, "error": f"git commit 失败: {r2.get('stderr', r2.get('error', ''))}"}
 
     # 获取 commit hash
     rh = _run_git(cwd, ["log", "-1", "--format=%H"])

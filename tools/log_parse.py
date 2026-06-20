@@ -68,7 +68,7 @@ def parse(text: str, format: str = "auto", max_lines: int = 200) -> dict:
 _NGINX_RE = re.compile(
     r"^(?P<ip>\S+) - (?P<user>\S+) \[(?P<time>[^\]]+)\] "
     r'"(?P<method>\S+) (?P<path>\S+) (?P<proto>[^"]+)" '
-    r'(?P<status>\d+) (?P<size>\d+) "(?P<referer>[^"]*)" "(?P<ua>[^"]*)"'
+    r'(?P<status>\d+) (?P<size>[0-9-]+) "(?P<referer>[^"]*)" "(?P<ua>[^"]*)"'
 )
 
 
@@ -82,7 +82,7 @@ def _parse_nginx(line: str) -> dict:
 _APACHE_RE = re.compile(
     r"^(?P<ip>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "
     r'"(?P<method>\S+) (?P<path>\S+) (?P<proto>[^"]+)" '
-    r"(?P<status>\d+) (?P<size>\d+)"
+    r"(?P<status>\d+) (?P<size>[0-9-]+)"
 )
 
 

@@ -38,22 +38,24 @@ def _run_gh(args: list[str], cwd: str = None, timeout: int = 20) -> dict:
         cwd = os.getcwd()
     gh_bin = _find_gh()
     result = _run_cmd([gh_bin] + args, cwd=cwd, timeout=timeout)
-    if not result["ok"] and gh_bin not in result.get("error", ""):
+    if not result["ok"]:
         if gh_bin != "gh":
-            result["error"] = f"gh 未找到: {gh_bin}"
-    if not result["ok"] and gh_bin == "gh":
-        import sys
-        if sys.platform == "win32":
-            install_hint = "安装 GitHub CLI: winget install GitHub.cli"
-        elif sys.platform == "darwin":
-            install_hint = "安装 GitHub CLI: brew install gh"
+            # gh_bin 是自定义路径但命令失败，保留真实错误，添加提示
+            result["proposal"] = f"gh CLI 未在 {gh_bin} 找到，请检查 config.json 的 gh_path"
         else:
-            install_hint = "安装 GitHub CLI: apt install gh 或 dnf install gh"
-        result["error"] = (
-            f"{result.get('error', 'gh 未找到')}。"
-            f"如已安装 gh CLI，用 rg_search('gh') 找到路径后填入 config.json 的 gh_path；"
-            f"或 {install_hint}"
-        )
+            # gh_bin 是默认路径，添加安装提示
+            import sys
+            if sys.platform == "win32":
+                install_hint = "安装 GitHub CLI: winget install GitHub.cli"
+            elif sys.platform == "darwin":
+                install_hint = "安装 GitHub CLI: brew install gh"
+            else:
+                install_hint = "安装 GitHub CLI: apt install gh 或 dnf install gh"
+            result["proposal"] = (
+                f"{result.get('stderr', result.get('error', ''))}。"
+                f"如已安装 gh CLI，用 rg_search('gh') 找到路径后填入 config.json 的 gh_path；"
+                f"或 {install_hint}"
+            )
     return result
 
 

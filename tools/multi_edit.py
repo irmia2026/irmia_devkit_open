@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem
+from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem, check_path_allowed
 from .safe_edit import _backup_dir
 from .syntax_check import check as syntax_check_file
 
@@ -157,6 +157,9 @@ def run(edits: list, syntax_check: bool = True) -> dict:
             if not raw_file:
                 return {"ok": False, "error": f"edit #{i}: file is required"}
             path = Path(raw_file).resolve()
+            err = check_path_allowed(path)
+            if err:
+                return err
             if not path.exists() or not path.is_file():
                 return {"ok": False, "error": f"edit #{i}: file does not exist: {raw_file}"}
             if path.stat().st_size > SAFE_EDIT_MAX_SIZE:

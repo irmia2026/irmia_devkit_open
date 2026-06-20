@@ -81,6 +81,9 @@ def post(
     if err:
         return err
 
+    if data is None:
+        return {"ok": False, "error": "POST 请求必须提供 data 参数"}
+
     try:
         if isinstance(data, dict):
             data = json.dumps(data, ensure_ascii=False).encode("utf-8")

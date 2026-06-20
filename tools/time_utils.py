@@ -35,7 +35,7 @@ def iso_to_ts(iso: str) -> dict:
         import re as _re
         from datetime import timezone as _tz, timedelta as _td
         # fromisoformat 在 Python < 3.11 不解析时区偏移，手动处理
-        m = _re.match(r'^(.+?)([+-]\d{2}:\d{2}(?::\d{2})?)$', iso.replace('Z', '+00:00'))
+        m = _re.match(r'^(.+?)([+-]\d{2}:\d{2}(?::\d{2})?)$', iso.replace('Z', '+00:00').replace('z', '+00:00'))
         if m:
             base, offset_str = m.groups()
             dt = datetime.fromisoformat(base)

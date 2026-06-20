@@ -61,10 +61,10 @@ class TestGenInvalid:
 
     def test_length_zero(self):
         r = ug.gen("hex", length=0)
-        assert r["ok"] is True
-        assert len(r["value"]) == 0
+        assert r["ok"] is False
+        assert "error" in r
 
     def test_token_length_zero(self):
         r = ug.gen("token", length=0)
-        assert r["ok"] is True
-        assert len(r["value"]) == 0
+        assert r["ok"] is False
+        assert "error" in r

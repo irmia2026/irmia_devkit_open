@@ -8,6 +8,7 @@ import difflib
 from pathlib import Path
 
 from ._file_utils import read_file, read_file_with_encoding, find_closest_line, align_whitespace, atomic_write_text
+from ._file_utils import check_path_allowed
 
 
 def _normalize_line_endings(s: str) -> str:
@@ -38,6 +39,9 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
         return {"ok": False, "error": "old 参数不能为空字符串"}
 
     p = Path(filepath)
+    err = check_path_allowed(p)
+    if err:
+        return err
     if not p.exists():
         return {"ok": False, "error": f"文件不存在: {filepath}"}
 
@@ -116,6 +120,9 @@ def preview(filepath: str, old: str, new: str, replace_all: bool = False) -> dic
         return {"ok": False, "error": "old 参数不能为空字符串"}
 
     p = Path(filepath)
+    err = check_path_allowed(p)
+    if err:
+        return err
     if not p.exists():
         return {"ok": False, "error": f"文件不存在: {filepath}"}
 

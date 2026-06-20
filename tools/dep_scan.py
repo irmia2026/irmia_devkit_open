@@ -25,7 +25,7 @@ def scan(project_dir: str = ".", timeout: int = 10) -> dict:
     deadline = time.time() + timeout
     scanned = 0
     for f in root.rglob("*.py"):
-        if "__pycache__" in str(f) or ".git" in str(f):
+        if "__pycache__" in str(f) or ".git" in f.parts:
             continue
         scanned += 1
         if time.time() > deadline:
@@ -49,7 +49,8 @@ def scan(project_dir: str = ".", timeout: int = 10) -> dict:
         try:
             deps = _extract_imports(f)
             if deps:
-                dep_graph[f.name] = deps
+                key = str(f.relative_to(root))
+                dep_graph[key] = deps
         except Exception:
             scanned -= 1  # 不计入成功扫描
 

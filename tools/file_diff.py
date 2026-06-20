@@ -7,13 +7,20 @@ file_diff — 文件差异比较。
 import difflib
 from pathlib import Path
 
-from ._file_utils import read_file, FILE_DIFF_MAX_SIZE
+from ._file_utils import read_file, FILE_DIFF_MAX_SIZE, check_path_allowed
 
 
 def compare(file_a: str, file_b: str) -> dict:
     """比较两个文件，返回结构化差异。"""
     pa = Path(file_a)
     pb = Path(file_b)
+
+    err = check_path_allowed(pa)
+    if err:
+        return err
+    err = check_path_allowed(pb)
+    if err:
+        return err
 
     if not pa.exists():
         return {"ok": False, "error": f"文件不存在: {file_a}"}

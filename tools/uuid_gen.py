@@ -19,6 +19,9 @@ def gen(kind: str = "uuid4", length: int = 16) -> dict:
     if kind == "uuid4":
         return {"ok": True, "kind": "uuid4", "value": str(uuid.uuid4())}
 
+    if length < 1:
+        return {"ok": False, "error": "length 必须大于 0"}
+
     if kind == "hex":
         return {
             "ok": True,

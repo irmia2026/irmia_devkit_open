@@ -30,6 +30,8 @@ def diff(file_a: str, file_b: str) -> dict:
         return {"ok": False, "error": f"无法解析 {file_a}: {e}"}
     try:
         obj_b = _load(pb)
+    except ImportError as e:
+        return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": f"无法解析 {file_b}: {e}"}
 
@@ -74,6 +76,9 @@ def diff(file_a: str, file_b: str) -> dict:
             f"{len(changed)}个key变更, {len(added)}个新增, {len(removed)}个删除。"
         )
         result["options"] = ["逐个应用到目标文件", "仅查看有差别的 key"]
+    else:
+        result["proposal"] = f"{len(added)}个新增, {len(removed)}个删除。"
+        result["options"] = ["查看全部差异"]
     return result
 
 

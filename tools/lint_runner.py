@@ -125,7 +125,7 @@ def _run_ruff(p: Path) -> dict:
             text=True,
             timeout=30,
         )
-        if r.returncode == 0:
+        if r.returncode == 0 and not r.stdout.strip():
             return {"ok": True, "linter": "ruff", "issues": [], "count": 0}
         issues = json.loads(r.stdout) if r.stdout.strip() else []
         result = {"ok": True, "linter": "ruff", "issues": issues, "count": len(issues)}

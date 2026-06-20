@@ -6,6 +6,8 @@ md5/sha1/sha256，纯 hashlib 标准库。
 import hashlib
 from pathlib import Path
 
+from ._file_utils import check_path_allowed
+
 ALGOS = {
     "md5": hashlib.md5,
     "sha1": hashlib.sha1,
@@ -16,6 +18,9 @@ ALGOS = {
 def compute(filepath: str, algo: str = "sha256") -> dict:
     """计算文件哈希值。算法: md5/sha1/sha256（默认）。"""
     p = Path(filepath)
+    err = check_path_allowed(p)
+    if err:
+        return err
     if not p.exists():
         return {"ok": False, "error": f"文件不存在: {filepath}"}
 

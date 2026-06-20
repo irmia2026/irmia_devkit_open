@@ -27,26 +27,7 @@ _MAX_TOTAL_SEARCH_STEPS = 500_000
 
 
 def _has_nested_quantifiers(pattern: str) -> bool:
-    """检测常见灾难性回溯模式，如 (a+)+、(a*)*、(a?)+ 等。"""
-    # 直接匹配 (X+)+、(X*)*、(X?)+ 及等价变体
-    stack = []
-    for ch in pattern:
-        if ch == '(':
-            stack.append([])
-        elif ch == ')':
-            if not stack:
-                continue
-            inner = stack.pop()
-            if not inner:
-                continue
-            # 内部是否包含量词
-            has_inner_quant = any(q in inner for q in '+*?')
-            # 括号后紧跟的量词
-            # 这里通过后续字符判断，需要向前看：暂存在解析循环外处理
-        elif stack:
-            stack[-1].append(ch)
-
-    # 更简单可靠：用正则检测 ( [^()]* [+*?] [^()]* ) [+*?]
+    """检测常见的灾难性回溯模式 (a+)+、(a*)*、(a?)+ 等。"""
     return bool(re.search(r'\([^()]*[+\*?][^()]*\)[+\*?]', pattern))
 
 

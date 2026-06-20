@@ -64,6 +64,9 @@ def truncate_output(text: str, max_lines: int = 500) -> tuple[str, bool]:
         return text, False
     head = max(1, int(max_lines * 0.2))
     tail = max(1, max_lines - head - 1)
+    # 预算很小的场景，省略标记占一行会超预算，直接返回头部
+    if head + tail + 1 > max_lines:
+        head, tail = max_lines, 0
     omitted = len(lines) - head - tail
     joined = "\n".join(
         lines[:head] + [f"[...{omitted} lines omitted...]"] + lines[-tail:]

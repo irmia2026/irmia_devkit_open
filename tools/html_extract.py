@@ -76,6 +76,9 @@ def extract(html: str, what: str = "text", selector: str = "") -> dict:
                 headers = [th.get_text(strip=True) for th in t.find_all("th")]
                 rows = []
                 for tr in t.find_all("tr"):
+                    # 跳过已作为 headers 捕获的表头行
+                    if tr.find("th") and not rows:
+                        continue
                     cols = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
                     if cols:
                         rows.append(cols)
