@@ -521,6 +521,8 @@ class TestFileReadHeadPerformance:
         assert result["ok"] is True
         assert result["returned_lines"] == 5
         assert result["has_more"] is True
+        # 大文件行数估算应接近真实值（21000），而不是 2 之类的离谱数字
+        assert result["total_lines"] > 10000
 
 
 class TestFindClosestLineIndent:

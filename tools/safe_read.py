@@ -19,7 +19,6 @@ safe_read — 增强版安全文件读取工具。
 
 from __future__ import annotations
 
-import binascii
 import codecs
 import mimetypes
 import os
@@ -32,7 +31,6 @@ from ._file_utils import (
     detect_encoding,
     human_size,
     is_binary_file,
-    SymlinkGuard,
     check_path_allowed,
 )
 from ._helpers import proposal_reply
@@ -46,14 +44,12 @@ MAX_LINES_PER_CALL = 200                 # 每次最多返回 200 行
 MAX_BYTES_PER_CALL = 128 * 1024          # 每次返回内容上限 128KB（约 25K tokens）
 MAX_HEX_BYTES = 1024                     # hex preview 最多 1KB
 MAX_HEX_LINES = 64                       # hex preview 最多 64 行
-MAX_DIR_ENTRIES = 50                     # 目录读取最大条目数
 SKELETON_MAX_SIZE = 512 * 1024           # skeleton 模式最大处理 512KB
 SKELETON_MAX_LINES = 5000                # skeleton 模式最多处理 5000 行
 _SMALL_FILE_THRESHOLD = 1024 * 1024      # 小文件阈值：小于此值精确统计总行数
 
 # 向后兼容别名
 MAX_RETURN_BYTES = MAX_BYTES_PER_CALL
-MAX_FULL_READ_BYTES = 256 * 1024         # 全量文本读取硬上限 256KB
 
 
 # ── 内容截断辅助 ──
@@ -299,7 +295,7 @@ def _read_lines_range(
     start = max(1, start_line)
     end = end_line if end_line > 0 else float('inf')
 
-    with p.open('r', encoding=encoding, errors='replace') as f:
+    with p.open("r", encoding=encoding, errors="replace", newline="") as f:
         for line in f:
             total_lines += 1
 
@@ -434,18 +430,19 @@ def _estimate_line_count(path: str | Path, size: int, encoding: str = "utf-8") -
     sample_size = min(8192, size)
     if sample_size == 0:
         return 0
-    with p.open("r", encoding=encoding, errors="replace") as f:
-        sample = f.read(sample_size)
-    avg_line = len(sample.splitlines()) / max(len(sample), 1)
-    if avg_line == 0:
-        avg_line = 0.01
-    return max(1, int(size * avg_line / sample_size))
+    with p.open("rb") as f:
+        sample_bytes = f.read(sample_size)
+    sample = sample_bytes.decode(encoding, errors="replace")
+    lines_in_sample = len(sample.splitlines())
+    if lines_in_sample == 0:
+        return 1
+    return max(1, int(size * lines_in_sample / sample_size))
 
 
 def _count_lines_exact(path: str | Path, encoding: str) -> int:
     """精确统计文件行数。"""
     total = 0
-    with Path(path).open("r", encoding=encoding, errors="replace") as f:
+    with Path(path).open("r", encoding=encoding, errors="replace", newline="") as f:
         for _ in f:
             total += 1
     return total
@@ -634,7 +631,7 @@ def read(
     max_depth: int = 3,
     include_metadata: bool = True,
     recursive: bool = False,
-    max_entries: int = MAX_DIR_ENTRIES,
+    max_entries: int = 50,
     include_hidden: bool = False,
 ) -> dict:
     """增强版安全文件读取工具。
