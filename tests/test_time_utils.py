@@ -23,7 +23,8 @@ class TestNow:
         parsed = datetime.fromisoformat(r["iso"])
         # Allow small drift due to separate datetime.now() calls.
         assert abs(parsed.timestamp() - r["timestamp"]) < 2
-        assert r["timestamp_ms"] == r["timestamp"] * 1000
+        # timestamp_ms 保留亚秒, timestamp 截断到秒, 两者容差 <1000ms
+        assert abs(r["timestamp_ms"] - r["timestamp"] * 1000) < 1000
 
 
 class TestTsToIso:
@@ -53,7 +54,7 @@ class TestIsoToTs:
     def test_with_timezone(self):
         r = tu.iso_to_ts("2026-05-20T23:00:00+00:00")
         assert r["ok"] is True
-        assert r["timestamp"] == 1776255600
+        assert r["timestamp"] == 1779318000  # 2026-05-20T23:00:00Z
 
     def test_invalid_iso(self):
         r = tu.iso_to_ts("not an iso string")

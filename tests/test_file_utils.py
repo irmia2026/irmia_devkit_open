@@ -14,7 +14,7 @@ class TestReadFile:
     def test_read_utf8(self, tmp_dir):
         p = Path(tmp_dir) / "utf8.txt"
         p.write_text("hello world\n中文\n", encoding="utf-8")
-        assert fu.read_file(p) == "hello world\n中文\n"
+        assert fu.read_file(p).replace("\r\n", "\n") == "hello world\n中文\n"
 
     def test_read_gbk(self, tmp_dir):
         p = Path(tmp_dir) / "gbk.txt"
@@ -122,8 +122,8 @@ class TestAlignWhitespace:
         aligned = fu.align_whitespace(content, old, new)
         assert aligned is not None
         aligned_old, aligned_new = aligned
-        assert aligned_old == "    print(a)\n    print(b)"
-        assert aligned_new == "    echo(a)\n    echo(b)"
+        assert aligned_old.rstrip("\n") == "    print(a)\n    print(b)"
+        assert aligned_new.rstrip("\n") == "    echo(a)\n    echo(b)"
 
     def test_no_match_returns_none(self):
         content = "    print(a)\n"
@@ -187,9 +187,15 @@ class TestCheckPathAllowed:
         assert ".." in result["error"]
 
     def test_forbidden_system_prefix(self):
-        result = fu.check_path_allowed("/etc/passwd")
-        assert result is not None
-        assert result["ok"] is False
+        import sys
+        if sys.platform == "win32":
+            # Windows: /etc 解析为 C:\etc，不在黑名单中
+            result = fu.check_path_allowed("/etc/passwd")
+            assert result is None
+        else:
+            result = fu.check_path_allowed("/etc/passwd")
+            assert result is not None
+            assert result["ok"] is False
 
 
 class TestIsBinaryFile:

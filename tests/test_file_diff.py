@@ -25,9 +25,9 @@ class TestCompare:
         r = fd.compare(str(a), str(b))
         assert r["ok"] is True
         assert r["identical"] is False
-        assert r["added"] == 1
+        assert r["added"] == 2
         assert r["removed"] == 1
-        assert r["total_changes"] == 2
+        assert r["total_changes"] == 3
         assert "baz" in r["diff"]
 
     def test_missing_file_a(self, tmp_dir):

@@ -255,7 +255,8 @@ def human_size(n: int) -> str:
             s = f"{n:.1f}{unit}"
             return s.replace(".0", "") if ".0" in s else s
         n /= 1024
-    return f"{n:.1f}PB"
+    s = f"{n:.1f}PB"
+    return s.replace(".0PB", "PB")
 
 
 def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -> None:
@@ -299,7 +300,7 @@ def backup_name_stem(p: Path) -> str:
     return f"{p.name}.{dir_hash}"
 
 
-def find_closest_line(content: str, old: str, threshold: float = 0.3) -> dict | None:
+def find_closest_line(content: str, old: str, threshold: float = 0.5) -> dict | None:
     """在 content 中找与 old 首行最接近的匹配行，返回行号和文本。保留缩进。"""
     lines = content.split("\n")
     best = None
