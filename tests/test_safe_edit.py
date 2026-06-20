@@ -142,3 +142,10 @@ class TestSafeEdit:
             assert Path(path).read_bytes() == b"    a = 2\n    b = 2\n"
         finally:
             os.unlink(path)
+
+    def test_rollback_nonexistent_file(self, tmp_dir):
+        """rollback 不存在的文件应返回友好错误。"""
+        from tools.safe_edit import rollback
+        result = rollback(str(Path(tmp_dir) / "no_such_file.py"))
+        assert result["ok"] is False
+        assert "不存在" in result["error"]

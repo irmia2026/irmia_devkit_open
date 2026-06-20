@@ -51,18 +51,6 @@ def _collect_positions(content: str, old: str) -> list[int]:
     return positions
 
 
-    """收集 old 在 content 中所有非重叠匹配的起始索引。"""
-    positions = []
-    pos = 0
-    while True:
-        idx = content.find(old, pos)
-        if idx == -1:
-            break
-        positions.append(idx)
-        pos = idx + len(old)
-    return positions
-
-
 def edit(
     filepath: str, old: str, new: str, replace_all: bool = False, occurrence: int = 0
 ) -> dict:
@@ -284,9 +272,10 @@ def edit(
 
 def list_backups(filepath: str | None = None) -> dict:
     """列出备份文件。"""
-    _backup_dir().mkdir(parents=True, exist_ok=True)
+    backup_root = _backup_dir()
+    backup_root.mkdir(parents=True, exist_ok=True)
     backups = []
-    for b in sorted(_backup_dir().glob("*.bak"), reverse=True):
+    for b in sorted(backup_root.glob("*.bak"), reverse=True):
         stat = b.stat()
         backups.append(
             {
@@ -297,30 +286,37 @@ def list_backups(filepath: str | None = None) -> dict:
         )
 
     if filepath:
-        name = Path(filepath).name
-        prefix = f"{name}."
+        prefix = f"{backup_name_stem(Path(filepath))}."
         backups = [b for b in backups if b["file"].startswith(prefix)]
 
     return {"ok": True, "backups": backups[:20], "total": len(backups)}
 
 
-def rollback(filepath: str, backup_name: str = None) -> dict:
+def rollback(filepath: str, backup_name: str | None = None) -> dict:
     """
     回滚文件到指定备份。不指定则回滚到最近的备份。
     """
     p = Path(filepath)
 
+    if not p.exists():
+        return {"ok": False, "error": f"目标文件不存在: {filepath}"}
+
+    backup_root = _backup_dir()
+
     if backup_name:
-        backup_path = _backup_dir() / Path(backup_name).name  # 只取文件名防路径穿越
+        backup_path = backup_root / Path(backup_name).name  # 只取文件名防路径穿越
         if not backup_path.exists():
             return {"ok": False, "error": f"备份不存在: {backup_name}"}
     else:
         # 找最近的备份
         pattern = f"{backup_name_stem(p)}.*.bak"
-        candidates = sorted(_backup_dir().glob(pattern), reverse=True)
+        candidates = sorted(backup_root.glob(pattern), reverse=True)
         if not candidates:
             return {"ok": False, "error": f"没有找到 {p.name} 的备份"}
         backup_path = candidates[0]
 
-    shutil.copy2(str(backup_path), filepath)
+    try:
+        shutil.copy2(str(backup_path), filepath)
+    except (OSError, UnicodeError) as e:
+        return {"ok": False, "error": f"回滚失败: {e}", "proposal": f"备份在 {backup_path}，请手动复制恢复"}
     return {"ok": True, "file": filepath, "restored_from": str(backup_path)}
