@@ -1,6 +1,9 @@
 """Tests for safe_write — new file / overwrite tool."""
 
+import sys
 from pathlib import Path
+
+import pytest
 from tools import config as _cfg
 from tools.safe_write import write
 
@@ -67,6 +70,7 @@ class TestSafeWrite:
         result = write(str(Path(tmp_dir) / "none.txt"), None)
         assert result["ok"] is False
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows 系统路径测试")
     def test_system_dir_blocked(self, tmp_dir):
         """系统目录写入应被拒绝"""
         result = write("C:/Windows/System32/test.txt", "evil")

@@ -1,6 +1,7 @@
 """Tests for safe_edit — backup/patch/syntax/rollback pipeline."""
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 import pytest
@@ -101,6 +102,7 @@ class TestSafeEdit:
         content = Path(python_file).read_bytes()
         assert content == b"x = 1\r\ny = 2\r\nz = 1\r\n"
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows 系统路径测试")
     def test_path_sandbox_rejects_system(self, python_file):
         """尝试编辑系统目录文件应被沙箱拒绝。"""
         result = edit("C:/Windows/System32/notepad.exe", "old", "new")
