@@ -20,6 +20,7 @@ safe_read — 增强版安全文件读取工具。
 from __future__ import annotations
 
 import binascii
+import codecs
 import mimetypes
 import os
 import re
@@ -339,20 +340,31 @@ def _read_head(
     n_lines: int = MAX_LINES_PER_CALL,
 ) -> tuple[list[str], int, bool]:
     """读取文件头部 n 行。
-    
+
+    小文件（<=1MB）精确统计 total_lines；大文件读到 n_lines+1 后即停止，
+    total_lines 使用估算值，避免扫描整个大文件。
+
     返回：(lines, total_lines, has_more)
     """
     p = Path(path)
+    file_size = p.stat().st_size
     lines = []
     total_lines = 0
-    
-    with p.open('r', encoding=encoding, errors='replace') as f:
+    has_more = False
+
+    with p.open("r", encoding=encoding, errors="replace", newline="") as f:
         for line in f:
             total_lines += 1
             if len(lines) < n_lines:
-                lines.append(line.rstrip('\n').rstrip('\r'))
-    
-    has_more = total_lines > len(lines)
+                lines.append(line.rstrip("\n").rstrip("\r"))
+            else:
+                has_more = True
+                if file_size > _SMALL_FILE_THRESHOLD:
+                    break
+
+    if has_more and file_size > _SMALL_FILE_THRESHOLD:
+        total_lines = max(n_lines + 1, _estimate_line_count(p, file_size))
+
     return lines, total_lines, has_more
 
 
@@ -643,6 +655,36 @@ def read(
         max_entries: 已弃用：目录读取已移除
         include_hidden: 已弃用：目录读取已移除
     """
+    # 0. 参数校验
+    if not path or not isinstance(path, (str, os.PathLike)):
+        return proposal_reply(
+            False,
+            "path 参数不能为空",
+            error="path is required",
+            evidence={"path": path},
+            options=["提供有效的文件路径"],
+        )
+    if head < 0:
+        return proposal_reply(False, "head 不能为负数", error="head must be >= 0")
+    if tail < 0:
+        return proposal_reply(False, "tail 不能为负数", error="tail must be >= 0")
+    if max_lines <= 0:
+        return proposal_reply(False, "max_lines 必须大于 0", error="max_lines must be > 0")
+    if offset < 0:
+        return proposal_reply(False, "offset 不能为负数", error="offset must be >= 0")
+    if encoding != "auto":
+        try:
+            codecs.lookup(encoding)
+        except LookupError:
+            return proposal_reply(False, f"不支持的编码: {encoding}", error=f"unknown encoding: {encoding}")
+    if mode not in {"auto", "text", "binary", "hex", "skeleton"}:
+        return proposal_reply(
+            False,
+            f"不支持的 mode: {mode}",
+            error=f"mode must be one of auto/text/binary/hex/skeleton",
+            options=["mode=text", "mode=binary", "mode=hex"],
+        )
+
     # 0. 路径安全校验（与 safe_write/file_remove 同级）
     forbidden = check_path_allowed(path)
     if forbidden:

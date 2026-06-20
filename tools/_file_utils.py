@@ -300,7 +300,7 @@ def backup_name_stem(p: Path) -> str:
 
 
 def find_closest_line(content: str, old: str, threshold: float = 0.3) -> dict | None:
-    """在 content 中找与 old 首行最接近的匹配行，返回行号和文本。"""
+    """在 content 中找与 old 首行最接近的匹配行，返回行号和文本。保留缩进。"""
     lines = content.split("\n")
     best = None
     best_ratio = 0
@@ -309,7 +309,7 @@ def find_closest_line(content: str, old: str, threshold: float = 0.3) -> dict | 
         ratio = difflib.SequenceMatcher(None, first_line, line).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
-            best = (i + 1, line.strip()[:80])
+            best = (i + 1, line.rstrip("\r")[:80])
     if best and best_ratio > threshold:
         return {"line": best[0], "text": best[1]}
     return None

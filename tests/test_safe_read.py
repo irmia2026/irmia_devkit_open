@@ -454,3 +454,66 @@ class TestFileReadProposal:
         assert result["returned_lines"] == 3
         assert "9998" in result["content"]
         assert "10000" in result["content"]
+
+
+class TestFileReadValidation:
+    """参数校验。"""
+
+    def test_path_none_rejected(self, tmp_dir):
+        result = safe_read.read(None)
+        assert result["ok"] is False
+        assert "path" in result["error"].lower()
+
+    def test_tail_negative_rejected(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("x")
+        result = safe_read.read(str(f), tail=-1)
+        assert result["ok"] is False
+        assert "tail" in result["error"].lower()
+
+    def test_head_negative_rejected(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("x")
+        result = safe_read.read(str(f), head=-1)
+        assert result["ok"] is False
+        assert "head" in result["error"].lower()
+
+    def test_invalid_encoding_rejected(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("x")
+        result = safe_read.read(str(f), encoding="not-a-codec")
+        assert result["ok"] is False
+        assert "编码" in result["error"] or "encoding" in result["error"].lower()
+
+    def test_invalid_mode_rejected(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("x")
+        result = safe_read.read(str(f), mode="foobar")
+        assert result["ok"] is False
+        assert "mode" in result["error"].lower()
+
+
+class TestFileReadHeadPerformance:
+    """head 模式不应扫描整个大文件。"""
+
+    def test_head_stops_early_on_large_file(self, tmp_dir):
+        f = Path(tmp_dir) / "big.log"
+        # 超过 1MB 的大文件，多行
+        line = "x" * 100
+        # 约 2MB 内容
+        f.write_text("\n".join([line] * 21000), encoding="utf-8")
+        result = safe_read.read(str(f), head=5)
+        assert result["ok"] is True
+        assert result["returned_lines"] == 5
+        assert result["has_more"] is True
+
+
+class TestFindClosestLineIndent:
+    """find_closest_line 应保留缩进提示。"""
+
+    def test_closest_line_keeps_indent(self, tmp_dir):
+        from tools._file_utils import find_closest_line
+
+        content = "    def foo():\n        pass\n"
+        closest = find_closest_line(content, "def foo")
+        assert closest["text"].startswith("    ")
