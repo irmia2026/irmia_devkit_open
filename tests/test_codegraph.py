@@ -120,7 +120,40 @@ class TestExtractPython:
         assert len(imports) >= 1
 
 
-# ── CodeGraph index ───────────────────────────────────
+    def test_no_triggers_for_random_attribute_call(self, tmp_project):
+        """普通属性调用参数不应产生 triggers 边。"""
+        path = os.path.join(tmp_project, "caller.py")
+        Path(path).write_text("""
+def caller():
+    x = 1
+    obj.method(x)
+""", encoding="utf-8")
+        symbols, edges = _extract_python(path)
+        triggers = [e for e in edges if e["kind"] == "triggers"]
+        assert len(triggers) == 0
+
+    def test_triggers_for_register_call(self, tmp_project):
+        """register(func) / add_tool(tool) 类调用应产生 triggers 边。"""
+        path = os.path.join(tmp_project, "register.py")
+        Path(path).write_text("""
+def handler(): pass
+
+def setup():
+    registry.register(handler)
+    tools.add_tool(handler)
+""", encoding="utf-8")
+        symbols, edges = _extract_python(path)
+        triggers = [e for e in edges if e["kind"] == "triggers"]
+        assert any(e["from"] == "handler" and e["to"] == "setup" for e in triggers)
+
+    def test_gbk_encoding_without_cookie(self, tmp_project):
+        """无 coding cookie 的 GBK 文件也能正确读取中文。"""
+        path = os.path.join(tmp_project, "gbk.py")
+        Path(path).write_bytes('def foo():\n    x = "中文"\n'.encode("gbk"))
+        symbols, edges = _extract_python(path)
+        src = next((s["source"] for s in symbols if s["name"] == "foo"), "")
+        assert "中文" in src, f"GBK 中文未正确解码: {src!r}"
+
 
 
 class TestCodeGraphIndex:
@@ -136,6 +169,32 @@ class TestCodeGraphIndex:
             assert r["stats"]["edges"] > 0
         finally:
             cg.close()
+            for f in [path, path + "-shm", path + "-wal"]:
+                try: os.unlink(f)
+                except OSError: pass
+
+    def test_index_includes_tests_dir(self):
+        """tests 目录下的文件也应被索引。"""
+        d = tempfile.mkdtemp()
+        root = Path(d) / "project"
+        root.mkdir()
+        (root / "src.py").write_text("def foo(): pass")
+        test_dir = root / "tests"
+        test_dir.mkdir()
+        (test_dir / "test_foo.py").write_text("def test_foo(): pass")
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        cg = CodeGraph(path)
+        try:
+            r = cg.index(str(root))
+            assert r["ok"] is True
+            assert r["stats"]["files"] == 2
+            files = {row[0] for row in cg._conn_get().execute("SELECT DISTINCT file FROM symbols")}
+            assert "tests/test_foo.py" in files
+        finally:
+            cg.close()
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
             for f in [path, path + "-shm", path + "-wal"]:
                 try: os.unlink(f)
                 except OSError: pass
@@ -204,7 +263,30 @@ class TestCodeGraphExplore:
             os.unlink(path)
 
 
-# ── CodeGraph explore top-source truncation ───────────
+    def test_search_like_wildcard_escaped(self):
+        """LIKE 通配符 _ 应被转义，避免 foo_bar 匹配 fooXbar。"""
+        d = tempfile.mkdtemp()
+        root = Path(d) / "proj"
+        root.mkdir()
+        (root / "a.py").write_text("def foo_bar(): pass\ndef fooXbar(): pass\n")
+        fd, db = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        cg = CodeGraph(db)
+        try:
+            cg.index(str(root))
+            r = cg.explore("foo_bar")
+            assert r["found"] is True
+            names = {s["name"] for s in r.get("symbols", [])}
+            assert "foo_bar" in names
+            assert "fooXbar" not in names
+        finally:
+            cg.close()
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+            for f in [db, db + "-shm", db + "-wal"]:
+                try: os.unlink(f)
+                except OSError: pass
+
 
 
 class TestCodeGraphTopSource:
@@ -319,7 +401,18 @@ class TestCodeGraphDiffImpact:
             cg.close()
 
 
-# ── CodeGraph status ──────────────────────────────────
+    def test_impact_with_absolute_path(self, test_db, tmp_project):
+        """绝对路径输入也能正确匹配数据库中的相对路径。"""
+        cg = CodeGraph(test_db)
+        try:
+            abs_path = os.path.join(tmp_project, "utils.py")
+            r = cg.code_diff_impact([abs_path], max_depth=1)
+            assert r["ok"] is True
+            assert len(r["affected_symbols"]) > 0
+            assert any(s["file"] == "utils.py" and s["depth"] == 0 for s in r["affected_symbols"])
+        finally:
+            cg.close()
+
 
 
 class TestCodeGraphStatus:
@@ -374,7 +467,41 @@ class TestResolveReferences:
                 except OSError: pass
 
 
-# ── _bfs_path ─────────────────────────────────────────
+    def test_resolves_relative_import_with_same_name(self):
+        """存在同名符号时，相对 import 也能正确解析。"""
+        d = tempfile.mkdtemp()
+        root = Path(d) / "pkg"
+        root.mkdir()
+        (root / "__init__.py").write_text("")
+        (root / "utils.py").write_text("def helper(): pass")
+        (root / "other.py").write_text("def helper(): pass")
+        (root / "main.py").write_text("from .utils import helper\n\ndef main():\n    helper()\n")
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        cg = CodeGraph(path)
+        try:
+            cg.index(str(root))
+            conn = sqlite3.connect(path)
+            edge = conn.execute(
+                "SELECT to_sym, resolved FROM edges WHERE kind='calls' AND from_sym='main'"
+            ).fetchone()
+            assert edge is not None
+            assert edge[0] == "helper"
+            assert edge[1] == 1
+            # 确认解析到 utils.py 的 helper，而不是 other.py
+            sym_file = conn.execute(
+                "SELECT file FROM symbols WHERE name='helper' AND file='utils.py'"
+            ).fetchone()
+            assert sym_file is not None
+            conn.close()
+        finally:
+            cg.close()
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+            for f in [path, path + "-shm", path + "-wal"]:
+                try: os.unlink(f)
+                except OSError: pass
+
 
 
 class TestBfsPath:
