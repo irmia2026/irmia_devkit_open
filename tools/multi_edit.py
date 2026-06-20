@@ -10,12 +10,17 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace
+from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem
 from .safe_edit import _backup_dir
 from .syntax_check import check as syntax_check_file
 
 
 _CODE_SUFFIXES = (".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx")
+
+
+def _normalize_line_endings(s: str) -> str:
+    """统一把 \\r\\n 转成 \\n，方便跨换行风格匹配。"""
+    return s.replace("\r\n", "\n")
 
 
 def _positions(content: str, old: str) -> list[int]:
@@ -37,17 +42,21 @@ def _line_col(content: str, idx: int) -> tuple[int, int]:
 
 
 def _apply_one(content: str, edit_item: dict, item_index: int) -> tuple[str, dict]:
-    old = edit_item.get("old", "")
-    new = edit_item.get("new", "")
+    old = _normalize_line_endings(edit_item.get("old", ""))
+    new = _normalize_line_endings(edit_item.get("new", ""))
     replace_all = bool(edit_item.get("replace_all", False))
     occurrence = int(edit_item.get("occurrence", 0) or 0)
     if not old:
         raise ValueError(f"edit #{item_index}: old must not be empty")
+    if occurrence < 0:
+        raise ValueError(f"edit #{item_index}: occurrence must be >= 0")
+    if replace_all and occurrence > 0:
+        raise ValueError(f"edit #{item_index}: replace_all and occurrence are mutually exclusive")
     positions = _positions(content, old)
     if not positions:
         # P0-1: whitespace-tolerant fallback (inherited from safe_edit)
         aligned = align_whitespace(content, old, new)
-        if aligned and not replace_all:
+        if aligned:
             old, new = aligned
             positions = _positions(content, old)
         if not positions:
@@ -92,6 +101,8 @@ def _syntax_check_temp(original: Path, content: str, encoding: str) -> dict:
             fd = -1
             f.write(content)
         return syntax_check_file(tmp_name)
+    except Exception as exc:
+        return {"ok": False, "error": f"syntax check internal error: {exc}"}
     finally:
         if fd != -1:
             try:
@@ -109,7 +120,7 @@ def _backup_file(path: Path) -> Path:
     backup_root = _backup_dir()
     backup_root.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = backup_root / f"{path.name}.{ts}.multi.bak"
+    backup_path = backup_root / f"{backup_name_stem(path)}.{ts}.multi.bak"
     shutil.copy2(str(path), str(backup_path))
     return backup_path
 
@@ -152,7 +163,13 @@ def run(edits: list, syntax_check: bool = True) -> dict:
                 return {"ok": False, "error": f"edit #{i}: file exceeds 20MB limit: {raw_file}"}
             if path not in files:
                 content, encoding = read_file_with_encoding(path)
-                files[path] = {"original": content, "content": content, "encoding": encoding, "edits": []}
+                files[path] = {
+                    "original": content,
+                    "content": _normalize_line_endings(content),
+                    "encoding": encoding,
+                    "has_crlf": "\r\n" in content,
+                    "edits": [],
+                }
             new_content, meta = _apply_one(files[path]["content"], item, i)
             files[path]["content"] = new_content
             files[path]["edits"].append({"index": i, **meta})
@@ -187,8 +204,9 @@ def run(edits: list, syntax_check: bool = True) -> dict:
         for path, data in files.items():
             backups[path] = _backup_file(path)
             fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent), text=True)
+            final_content = data["content"].replace("\n", "\r\n") if data["has_crlf"] else data["content"]
             with os.fdopen(fd, "w", encoding=data["encoding"], newline="") as f:
-                f.write(data["content"])
+                f.write(final_content)
             tmp_paths[path] = Path(tmp_name)
         for path, tmp_path in tmp_paths.items():
             os.replace(str(tmp_path), str(path))
@@ -211,7 +229,7 @@ def run(edits: list, syntax_check: bool = True) -> dict:
             "applied": [],
             "total_requested": len(edits),
             "total_applied": 0,
-            "rolled_back_all": True,
+            "rolled_back_all": len(rollback_errors) == 0,
             "rollback_errors": rollback_errors,
         }
 
