@@ -500,5 +500,20 @@ button:disabled { cursor: not-allowed; opacity: .46; filter: grayscale(.35); tra
   filter: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  :root[data-background-mode="custom"] .hero-card,
+  :root[data-background-mode="custom"] .card,
+  :root[data-background-mode="custom"] .path-card,
+  :root[data-background-mode="custom"] .group-card,
+  :root[data-background-mode="custom"] .brand-card,
+  :root[data-background-mode="custom"] .dock-button,
+  :root[data-background-mode="custom"] .global-contact-card,
+  :root[data-background-mode="custom"] .contact-section-head,
+  :root[data-background-mode="custom"] .group-item,
+  :root[data-background-mode="custom"] .small-stat,
+  :root[data-background-mode="custom"] .bulk-row,
+  :root[data-background-mode="custom"] .path-grid label,
+  :root[data-background-mode="custom"] .tool-card {
+    animation: none !important;
+    transition: none !important;
+  }
 }

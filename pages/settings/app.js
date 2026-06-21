@@ -11,6 +11,7 @@ const BACKGROUND_MODES = ["preset", "custom"];
 const CUSTOM_BACKGROUND_SIZE = { width: 1920, height: 1080, quality: 0.86 };
 let paletteMode = "luxury";
 let appearanceMode = "auto";
+let previousAppearanceMode = "auto";
 let backgroundMode = "preset";
 let customBackgroundUrl = "";
 let api = null;
@@ -112,9 +113,9 @@ function refreshThemeControls() {
 function applyCustomBackground(url) {
   customBackgroundUrl = String(url || "");
   if (customBackgroundUrl) {
+    if (backgroundMode !== "custom") previousAppearanceMode = APPEARANCE_MODES.includes(appearanceMode) ? appearanceMode : getStoredAppearanceMode();
     backgroundMode = "custom";
     appearanceMode = "dark";
-    saveAppearanceLocally("dark");
     document.documentElement.style.setProperty("--custom-bg-image", `url("${customBackgroundUrl}")`);
     applyPalette(paletteMode);
     applyAppearance("dark");
@@ -124,7 +125,6 @@ function applyCustomBackground(url) {
     applyPalette(paletteMode);
     applyAppearance(appearanceMode);
   }
-  refreshThemeControls();
 }
 
 function applyPalette(mode = getStoredPaletteMode()) {
@@ -187,10 +187,12 @@ async function loadUiPreferences() {
     const data = await api.safeGet("ui_preferences");
     const palette = data.preferences?.palette_mode;
     const appearance = data.preferences?.appearance_mode;
+    const previousAppearance = data.preferences?.previous_appearance_mode;
     const bgMode = data.preferences?.background_mode;
     const bgUrl = data.preferences?.custom_background_url;
     customBackgroundUrl = String(bgUrl || "");
     if (BACKGROUND_MODES.includes(bgMode)) backgroundMode = bgMode;
+    if (APPEARANCE_MODES.includes(previousAppearance)) previousAppearanceMode = previousAppearance;
     if (APPEARANCE_MODES.includes(appearance)) {
       appearanceMode = appearance;
       saveAppearanceLocally(appearance);
@@ -219,6 +221,7 @@ async function saveUiPreferences() {
     await api.safePost("ui_preferences/save", {
       palette_mode: paletteMode,
       appearance_mode: appearanceMode,
+      previous_appearance_mode: previousAppearanceMode,
       background_mode: backgroundMode,
       custom_background_url: customBackgroundUrl || "",
     });
@@ -245,10 +248,12 @@ function handleBackgroundButtonClick() {
 
 async function switchToPresetBackground() {
   backgroundMode = "preset";
+  const restoredAppearance = APPEARANCE_MODES.includes(previousAppearanceMode) ? previousAppearanceMode : "auto";
+  appearanceMode = restoredAppearance;
+  saveAppearanceLocally(restoredAppearance);
   document.documentElement.style.removeProperty("--custom-bg-image");
   applyPalette(paletteMode);
-  applyAppearance(appearanceMode);
-  refreshThemeControls();
+  applyAppearance(restoredAppearance);
   await saveUiPreferences();
   showToast("已切换到预设配色，自定义背景已保留");
 }
@@ -329,7 +334,7 @@ async function handleCustomBackgroundUpload(event) {
     const url = await cropBackgroundFile(file);
     applyCustomBackground(url);
     await saveUiPreferences();
-    showToast("自定义背景已启用，深色/浅色/自动模式仍可切换");
+    showToast("自定义背景已启用（深色模式）");
   } catch (e) {
     console.error("handleCustomBackgroundUpload", e);
     showToast(e.message || "背景图处理失败");

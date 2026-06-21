@@ -241,8 +241,12 @@ class DevkitWebController:
         if appearance_mode not in {"auto", "light", "dark"}:
             appearance_mode = "auto"
         prefs = self._read_ui_preferences()
+        previous_appearance_mode = str(data.get("previous_appearance_mode", prefs.get("previous_appearance_mode", "auto"))).strip().lower()
+        if previous_appearance_mode not in {"auto", "light", "dark"}:
+            previous_appearance_mode = "auto"
         prefs["palette_mode"] = palette_mode
         prefs["appearance_mode"] = appearance_mode
+        prefs["previous_appearance_mode"] = previous_appearance_mode
         prefs["updated_at"] = int(time.time())
         self._write_ui_preferences(prefs)
         return self._jsonify({"ok": True, "preferences": prefs})
@@ -398,6 +402,8 @@ class DevkitWebController:
             data["palette_mode"] = palette_mode if palette_mode in {"luxury", "bluewhite", "vivid", "void"} else "luxury"
             appearance_mode = str(data.get("appearance_mode", "auto")).strip().lower()
             data["appearance_mode"] = appearance_mode if appearance_mode in {"auto", "light", "dark"} else "auto"
+            previous_appearance_mode = str(data.get("previous_appearance_mode", data["appearance_mode"])).strip().lower()
+            data["previous_appearance_mode"] = previous_appearance_mode if previous_appearance_mode in {"auto", "light", "dark"} else data["appearance_mode"]
             return data
         except Exception:
             logger.warning("ui_preferences.json 读取失败，已使用默认偏好")
