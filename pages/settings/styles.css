@@ -294,11 +294,11 @@ button:disabled { cursor: not-allowed; opacity: .46; filter: grayscale(.35); tra
 :root[data-background-mode="custom"] .card,
 :root[data-background-mode="custom"] .path-card,
 :root[data-background-mode="custom"] .group-card {
-  background: rgba(255,255,255,.035) !important;
-  border-color: rgba(255,255,255,.42) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 10px 28px rgba(0,0,0,.13) !important;
-  backdrop-filter: blur(2px) saturate(1.04) !important;
-  -webkit-backdrop-filter: blur(2px) saturate(1.04) !important;
+  background: rgba(255,255,255,.006) !important;
+  border-color: rgba(255,255,255,.32) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 :root[data-background-mode="custom"] .brand-card,
 :root[data-background-mode="custom"] .dock-button,
@@ -316,11 +316,11 @@ button:disabled { cursor: not-allowed; opacity: .46; filter: grayscale(.35); tra
 :root[data-background-mode="custom"] .tool-card.tool-action,
 :root[data-background-mode="custom"] .tool-card.tool-action.enabled,
 :root[data-background-mode="custom"] .tool-card.tool-action.disabled {
-  background: rgba(255,255,255,.018) !important;
-  border-color: rgba(255,255,255,.36) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12) !important;
-  backdrop-filter: blur(1.5px) saturate(1.03) !important;
-  -webkit-backdrop-filter: blur(1.5px) saturate(1.03) !important;
+  background: rgba(255,255,255,.006) !important;
+  border-color: rgba(255,255,255,.28) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   opacity: 1 !important;
   filter: none !important;
 }
@@ -396,8 +396,9 @@ button:disabled { cursor: not-allowed; opacity: .46; filter: grayscale(.35); tra
   -webkit-backdrop-filter: none !important;
 }
 :root[data-background-mode="custom"] .path-grid label:focus-within {
-  border-color: rgba(255,255,255,.48) !important;
-  background: rgba(255,255,255,.09) !important;
+  border-color: rgba(255,255,255,.28) !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* click-to-toggle tool rows */
