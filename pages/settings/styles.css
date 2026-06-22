@@ -131,13 +131,14 @@ body {
 }
 button, input { font: inherit; }
 button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .46; filter: grayscale(.35); transform: none !important; }
 .noise { position: fixed; inset: 0; pointer-events: none; opacity: .12; background-image: linear-gradient(transparent 50%, rgba(255,255,255,.05) 50%); background-size: 100% 4px; mix-blend-mode: overlay; }
 .side-rail { position: relative; z-index: 1; height: 100vh; padding: 14px 0 14px 14px; border-right: 1px solid var(--line); background: linear-gradient(180deg, var(--panel), rgba(0,0,0,.18)); backdrop-filter: blur(26px) saturate(1.25); display: flex; flex-direction: column; gap: 9px; }
 .brand-card { display: flex; gap: 9px; align-items: center; padding: 10px 12px; margin-right: 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel-2); box-shadow: var(--shadow); }
 .brand-mark { width: 38px; height: 38px; border-radius: 13px; display: block; object-fit: cover; object-position: center; background: rgba(0,0,0,.35); border: 1px solid var(--line); box-shadow: 0 18px 44px rgba(0,0,0,.32); }
 .brand-card h1 { margin: 0; font-size: 15px; letter-spacing: -.03em; line-height: 1.12; }
 .brand-card p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
-.palette-dock { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-right: 12px; }
+.palette-dock { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-right: 12px; }
 .dock-button { display: grid; justify-items: center; gap: 2px; border: 1px solid var(--line); color: var(--text); background: var(--panel-2); border-radius: 13px; padding: 7px 6px; font-weight: 850; }
 .dock-button b { color: var(--accent-3); font-size: 11px; line-height: 1.1; }
 .dock-button:hover { transform: translateY(-1px); border-color: var(--accent); }
@@ -253,3 +254,266 @@ button { cursor: pointer; }
 .workspace::-webkit-scrollbar { width: 6px; }
 .group-list::-webkit-scrollbar-thumb, .workspace::-webkit-scrollbar-thumb { background: var(--gradient); border-radius: 999px; }
 @media (max-width: 1040px) { body { grid-template-columns: 1fr; overflow: auto; } .side-rail { height: auto; max-height: 48vh; } .workspace { height: auto; min-height: 60vh; } .hero-grid, .top-pair, .board { grid-template-columns: 1fr; } }
+
+/* custom background glass layer */
+:root[data-background-mode="custom"][data-theme="dark"] {
+  --panel: rgba(8, 10, 18, .42);
+  --panel-2: rgba(255,255,255,.10);
+  --card: rgba(255,255,255,.13);
+  --card-dark: rgba(8,10,18,.36);
+  --text: #fff;
+  --text-invert: #fff;
+  --muted: rgba(255,255,255,.78);
+  --line: rgba(255,255,255,.34);
+  --shadow: 0 10px 28px rgba(0,0,0,.16);
+  color-scheme: dark;
+}
+:root[data-background-mode="custom"][data-theme="light"] {
+  --panel: rgba(255,255,255,.46);
+  --panel-2: rgba(255,255,255,.24);
+  --card: rgba(255,255,255,.34);
+  --card-dark: rgba(255,255,255,.30);
+  --text: #151923;
+  --text-invert: #151923;
+  --muted: rgba(21,25,35,.76);
+  --line: rgba(255,255,255,.34);
+  --shadow: 0 10px 28px rgba(37,49,74,.12);
+  color-scheme: light;
+}
+:root[data-background-mode="custom"][data-theme="dark"] body {
+  background: linear-gradient(135deg, rgba(0,0,0,.30), rgba(0,0,0,.42)), var(--custom-bg-image) center / cover fixed no-repeat !important;
+}
+:root[data-background-mode="custom"][data-theme="light"] body {
+  background: linear-gradient(135deg, rgba(255,255,255,.38), rgba(242,246,255,.48)), var(--custom-bg-image) center / cover fixed no-repeat !important;
+}
+:root[data-background-mode="custom"] .noise {
+  opacity: .035 !important;
+  display: block !important;
+}
+:root[data-background-mode="custom"] .hero-card,
+:root[data-background-mode="custom"] .card,
+:root[data-background-mode="custom"] .path-card,
+:root[data-background-mode="custom"] .group-card {
+  background: rgba(255,255,255,.006) !important;
+  border-color: rgba(255,255,255,.32) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-background-mode="custom"] .brand-card,
+:root[data-background-mode="custom"] .dock-button,
+:root[data-background-mode="custom"] .side-meta div,
+:root[data-background-mode="custom"] .global-contact-card,
+:root[data-background-mode="custom"] .contact-section-head,
+:root[data-background-mode="custom"] .group-item,
+:root[data-background-mode="custom"] .small-stat,
+:root[data-background-mode="custom"] .bulk-row,
+:root[data-background-mode="custom"] .path-grid label,
+:root[data-background-mode="custom"] .input-field,
+:root[data-background-mode="custom"] textarea,
+:root[data-background-mode="custom"] select,
+:root[data-background-mode="custom"] .tool-card,
+:root[data-background-mode="custom"] .tool-card.tool-action,
+:root[data-background-mode="custom"] .tool-card.tool-action.enabled,
+:root[data-background-mode="custom"] .tool-card.tool-action.disabled {
+  background: rgba(255,255,255,.006) !important;
+  border-color: rgba(255,255,255,.28) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+:root[data-background-mode="custom"] h1,
+:root[data-background-mode="custom"] h2,
+:root[data-background-mode="custom"] h3,
+:root[data-background-mode="custom"] b,
+:root[data-background-mode="custom"] .group-name,
+:root[data-background-mode="custom"] .tool-name,
+:root[data-background-mode="custom"] .field-label,
+:root[data-background-mode="custom"] .section-title,
+:root[data-background-mode="custom"] .confirm-title {
+  text-shadow: 0 2px 10px rgba(0,0,0,.42);
+}
+:root[data-background-mode="custom"] .input-field::placeholder { color: rgba(255,255,255,.56) !important; }
+
+/* optional path panel */
+:root[data-background-mode="custom"] .path-card {
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+:root[data-background-mode="custom"] .path-card::before,
+:root[data-background-mode="custom"] .path-card::after {
+  content: none !important;
+  display: none !important;
+}
+:root[data-background-mode="custom"] .path-head,
+:root[data-background-mode="custom"] .path-grid,
+:root[data-background-mode="custom"] .path-grid label,
+:root[data-background-mode="custom"] .path-grid .input-field {
+  position: relative !important;
+  z-index: 2 !important;
+}
+:root[data-background-mode="custom"] .path-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px 12px !important;
+  align-items: start !important;
+}
+:root[data-background-mode="custom"] .path-grid label {
+  display: grid !important;
+  grid-template-rows: auto 1fr !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+  min-height: 58px !important;
+  padding: 8px 13px !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
+}
+:root[data-background-mode="custom"] .path-grid label:nth-child(3) { grid-column: 1 / 2 !important; }
+:root[data-background-mode="custom"] .path-grid label > span {
+  padding: 0 3px !important;
+  font-size: 11px !important;
+  line-height: 1.1 !important;
+  color: var(--muted) !important;
+  opacity: .82 !important;
+}
+:root[data-background-mode="custom"] .path-grid .input-field,
+:root[data-background-mode="custom"] .path-input,
+:root[data-background-mode="custom"] .path-input:focus {
+  width: 100% !important;
+  min-height: 22px !important;
+  min-width: 0 !important;
+  padding: 0 3px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-background-mode="custom"] .path-grid label:focus-within {
+  border-color: rgba(255,255,255,.28) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* click-to-toggle tool rows */
+.tool-card.tool-action {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+  grid-template-columns: 34px 1fr !important;
+  appearance: none;
+  -webkit-appearance: none;
+  color: inherit;
+  border-width: 2px !important;
+}
+:root[data-background-mode="custom"] .group-item.active,
+:root[data-background-mode="custom"] .global-contact-card:has(.group-item.active),
+:root[data-background-mode="custom"] .tool-card.tool-action.enabled {
+  border-color: var(--accent) !important;
+  background: rgba(255,255,255,.024) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent) inset !important;
+}
+.tool-card.tool-action.enabled .tool-emoji,
+.tool-card.tool-action.disabled .tool-emoji {
+  background: rgba(255,255,255,.12) !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+.tool-card.tool-action.enabled .tool-emoji { border-color: var(--accent) !important; }
+:root[data-background-mode="custom"] .tool-card.tool-action:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* themed group switch */
+.group-head { align-items: center !important; }
+.group-head > .switch {
+  margin-left: auto !important;
+  align-self: center !important;
+  justify-self: end !important;
+}
+.group-head .switch input:checked + .switch-track,
+:root[data-background-mode="custom"] .group-head .switch input:checked + .switch-track {
+  background: var(--gradient) !important;
+  border-color: var(--accent) !important;
+}
+.group-head .switch input:not(:checked) + .switch-track,
+:root[data-background-mode="custom"] .group-head .switch input:not(:checked) + .switch-track {
+  background: rgba(255,255,255,.10) !important;
+  border-color: rgba(255,255,255,.24) !important;
+}
+.group-head .switch-thumb {
+  background: #fff !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.24) !important;
+}
+
+/* performance: reduce repaint cost during scrolling */
+:root[data-background-mode="custom"] .workspace,
+:root[data-background-mode="custom"] .group-list {
+  transform: translateZ(0);
+  will-change: scroll-position;
+  contain: layout paint style;
+}
+:root[data-background-mode="custom"] .tool-card,
+:root[data-background-mode="custom"] .group-item,
+:root[data-background-mode="custom"] .bulk-row,
+:root[data-background-mode="custom"] .path-grid label,
+:root[data-background-mode="custom"] .input-field,
+:root[data-background-mode="custom"] .tool-emoji,
+:root[data-background-mode="custom"] .group-icon,
+:root[data-background-mode="custom"] .switch-track,
+:root[data-background-mode="custom"] .dock-button {
+  transition: border-color .12s ease, background-color .12s ease !important;
+}
+:root[data-background-mode="custom"] .brand-card::before,
+:root[data-background-mode="custom"] .brand-card::after,
+:root[data-background-mode="custom"] .dock-button::before,
+:root[data-background-mode="custom"] .dock-button::after,
+:root[data-background-mode="custom"] .group-item::before,
+:root[data-background-mode="custom"] .group-item::after,
+:root[data-background-mode="custom"] .hero-card::before,
+:root[data-background-mode="custom"] .hero-card::after,
+:root[data-background-mode="custom"] .card::before,
+:root[data-background-mode="custom"] .card::after,
+:root[data-background-mode="custom"] .path-card::before,
+:root[data-background-mode="custom"] .path-card::after,
+:root[data-background-mode="custom"] .group-card::before,
+:root[data-background-mode="custom"] .group-card::after,
+:root[data-background-mode="custom"] .tool-card::before,
+:root[data-background-mode="custom"] .tool-card::after {
+  content: none !important;
+  display: none !important;
+}
+:root[data-background-mode="custom"] .tool-card:hover,
+:root[data-background-mode="custom"] .group-item:hover,
+:root[data-background-mode="custom"] .dock-button:hover,
+:root[data-background-mode="custom"] .bulk-row:hover,
+:root[data-background-mode="custom"] .card:hover,
+:root[data-background-mode="custom"] .group-card:hover {
+  transform: none !important;
+  filter: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-background-mode="custom"] .hero-card,
+  :root[data-background-mode="custom"] .card,
+  :root[data-background-mode="custom"] .path-card,
+  :root[data-background-mode="custom"] .group-card,
+  :root[data-background-mode="custom"] .brand-card,
+  :root[data-background-mode="custom"] .dock-button,
+  :root[data-background-mode="custom"] .global-contact-card,
+  :root[data-background-mode="custom"] .contact-section-head,
+  :root[data-background-mode="custom"] .group-item,
+  :root[data-background-mode="custom"] .small-stat,
+  :root[data-background-mode="custom"] .bulk-row,
+  :root[data-background-mode="custom"] .path-grid label,
+  :root[data-background-mode="custom"] .tool-card {
+    animation: none !important;
+    transition: none !important;
+  }
+}

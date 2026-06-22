@@ -7,8 +7,13 @@ const PALETTE_MODES = ["luxury", "bluewhite", "vivid", "void"];
 const APPEARANCE_MODES = ["auto", "dark", "light"];
 const PALETTE_LABELS = { luxury: "鎏金", bluewhite: "冰蓝", vivid: "霓虹", void: "暗涌" };
 const APPEARANCE_LABELS = { auto: "自动", dark: "深色", light: "浅色" };
+const BACKGROUND_MODES = ["preset", "custom"];
+const CUSTOM_BACKGROUND_SIZE = { width: 1920, height: 1080, quality: 0.86 };
 let paletteMode = "luxury";
 let appearanceMode = "auto";
+let previousAppearanceMode = "auto";
+let backgroundMode = "preset";
+let customBackgroundUrl = "";
 let api = null;
 let toolGroupsDef = {};
 let groupsData = [];
@@ -89,11 +94,45 @@ function getStoredPaletteMode() {
   return paletteMode;
 }
 
+function refreshThemeControls() {
+  const custom = backgroundMode === "custom";
+  const hasCustomBackground = Boolean(customBackgroundUrl);
+  const backgroundLabel = document.getElementById("backgroundModeLabel");
+  if (backgroundLabel) backgroundLabel.textContent = custom ? "上传" : (hasCustomBackground ? "自定义" : "上传");
+  document.getElementById("presetBackgroundBtn")?.toggleAttribute("disabled", !custom);
+  const appearanceBtn = document.getElementById("appearanceToggleBtn");
+  if (appearanceBtn) {
+    appearanceBtn.toggleAttribute("disabled", custom);
+    appearanceBtn.title = custom ? "自定义背景下已锁定深色模式" : "切换明暗模式";
+  }
+  const appearanceLabel = document.getElementById("appearanceModeLabel");
+  if (custom && appearanceLabel) appearanceLabel.textContent = "锁定";
+  document.documentElement.dataset.backgroundMode = custom ? "custom" : "preset";
+}
+
+function applyCustomBackground(url) {
+  customBackgroundUrl = String(url || "");
+  if (customBackgroundUrl) {
+    if (backgroundMode !== "custom") previousAppearanceMode = APPEARANCE_MODES.includes(appearanceMode) ? appearanceMode : getStoredAppearanceMode();
+    backgroundMode = "custom";
+    appearanceMode = "dark";
+    document.documentElement.style.setProperty("--custom-bg-image", `url("${customBackgroundUrl}")`);
+    applyPalette(paletteMode);
+    applyAppearance("dark");
+  } else {
+    backgroundMode = "preset";
+    document.documentElement.style.removeProperty("--custom-bg-image");
+    applyPalette(paletteMode);
+    applyAppearance(appearanceMode);
+  }
+}
+
 function applyPalette(mode = getStoredPaletteMode()) {
   paletteMode = PALETTE_MODES.includes(mode) ? mode : "luxury";
   document.documentElement.dataset.palette = paletteMode;
   const label = document.getElementById("paletteModeLabel");
   if (label) label.textContent = PALETTE_LABELS[paletteMode] || "鎏金";
+  refreshThemeControls();
 }
 
 function getStoredAppearanceMode() {
@@ -109,14 +148,21 @@ function resolveAppearance(mode) {
 }
 
 function applyAppearance(mode = getStoredAppearanceMode()) {
+  if (backgroundMode === "custom") mode = "dark";
   appearanceMode = APPEARANCE_MODES.includes(mode) ? mode : "auto";
   document.documentElement.dataset.appearance = appearanceMode;
-  document.documentElement.dataset.theme = resolveAppearance(appearanceMode);
+  document.documentElement.dataset.theme = backgroundMode === "custom" ? "dark" : resolveAppearance(appearanceMode);
   const label = document.getElementById("appearanceModeLabel");
-  if (label) label.textContent = APPEARANCE_LABELS[appearanceMode] || "自动";
+  if (label) label.textContent = backgroundMode === "custom" ? "锁定" : (APPEARANCE_LABELS[appearanceMode] || "自动");
+  refreshThemeControls();
 }
 
 async function cycleAppearanceMode() {
+  if (backgroundMode === "custom") {
+    applyAppearance("dark");
+    showToast("自定义背景下已锁定深色模式");
+    return;
+  }
   const current = appearanceMode || getStoredAppearanceMode();
   const currentIndex = APPEARANCE_MODES.includes(current) ? APPEARANCE_MODES.indexOf(current) : 0;
   const next = APPEARANCE_MODES[(currentIndex + 1) % APPEARANCE_MODES.length];
@@ -141,26 +187,158 @@ async function loadUiPreferences() {
     const data = await api.safeGet("ui_preferences");
     const palette = data.preferences?.palette_mode;
     const appearance = data.preferences?.appearance_mode;
+    const previousAppearance = data.preferences?.previous_appearance_mode;
+    const bgMode = data.preferences?.background_mode;
+    const bgUrl = data.preferences?.custom_background_url;
+    customBackgroundUrl = String(bgUrl || "");
+    if (BACKGROUND_MODES.includes(bgMode)) backgroundMode = bgMode;
+    if (APPEARANCE_MODES.includes(previousAppearance)) previousAppearanceMode = previousAppearance;
     if (APPEARANCE_MODES.includes(appearance)) {
       appearanceMode = appearance;
       saveAppearanceLocally(appearance);
-      applyAppearance(appearance);
     }
     if (PALETTE_MODES.includes(palette)) {
       paletteMode = palette;
       savePaletteLocally(palette);
-      applyPalette(palette);
+    }
+    if (backgroundMode === "custom" && bgUrl) {
+      applyCustomBackground(bgUrl);
       return;
     }
+    backgroundMode = "preset";
+    applyPalette(paletteMode);
+    applyAppearance(appearanceMode);
+    return;
   } catch (e) { console.warn("loadUiPreferences", e); }
+  backgroundMode = "preset";
   applyPalette();
   applyAppearance();
 }
 
 async function saveUiPreferences() {
   if (!api) return;
-  try { await api.safePost("ui_preferences/save", { palette_mode: paletteMode, appearance_mode: appearanceMode }); }
+  try {
+    await api.safePost("ui_preferences/save", {
+      palette_mode: paletteMode,
+      appearance_mode: appearanceMode,
+      previous_appearance_mode: previousAppearanceMode,
+      background_mode: backgroundMode,
+      custom_background_url: customBackgroundUrl || "",
+    });
+  }
   catch (e) { console.warn("saveUiPreferences", e); }
+}
+
+function activateStoredCustomBackground() {
+  if (!customBackgroundUrl) return false;
+  applyCustomBackground(customBackgroundUrl);
+  saveUiPreferences();
+  showToast("已启用上次自定义背景");
+  return true;
+}
+
+function handleBackgroundButtonClick() {
+  if (backgroundMode === "custom") {
+    document.getElementById("customBackgroundInput")?.click();
+    return;
+  }
+  if (activateStoredCustomBackground()) return;
+  document.getElementById("customBackgroundInput")?.click();
+}
+
+async function switchToPresetBackground() {
+  backgroundMode = "preset";
+  const restoredAppearance = APPEARANCE_MODES.includes(previousAppearanceMode) ? previousAppearanceMode : "auto";
+  appearanceMode = restoredAppearance;
+  saveAppearanceLocally(restoredAppearance);
+  document.documentElement.style.removeProperty("--custom-bg-image");
+  applyPalette(paletteMode);
+  applyAppearance(restoredAppearance);
+  await saveUiPreferences();
+  showToast("已切换到预设配色，自定义背景已保留");
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("图片加载失败"));
+    image.src = dataUrl;
+  });
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("图片读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function cropBackgroundFile(file) {
+  if (!file?.type?.startsWith("image/")) throw new Error("请选择图片文件");
+  if (file.size > 12 * 1024 * 1024) throw new Error("图片不能超过 12MB");
+  const dataUrl = await fileToDataUrl(file);
+  const image = await loadImageFromDataUrl(dataUrl);
+  const { width, height, quality } = CUSTOM_BACKGROUND_SIZE;
+  const targetRatio = width / height;
+  const sourceRatio = image.width / image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  // 第一层：用原图 cover 模式模糊铺满，避免留黑边。
+  let coverSx = 0, coverSy = 0, coverSw = image.width, coverSh = image.height;
+  if (sourceRatio > targetRatio) {
+    coverSw = image.height * targetRatio;
+    coverSx = (image.width - coverSw) / 2;
+  } else {
+    coverSh = image.width / targetRatio;
+    coverSy = (image.height - coverSh) / 2;
+  }
+  ctx.save();
+  ctx.filter = "blur(28px) saturate(1.08) brightness(0.82)";
+  ctx.drawImage(image, coverSx, coverSy, coverSw, coverSh, -36, -36, width + 72, height + 72);
+  ctx.restore();
+
+  // 第二层：用 contain 模式尽量保留完整图片主体。
+  let drawW = width;
+  let drawH = height;
+  if (sourceRatio > targetRatio) {
+    drawH = width / sourceRatio;
+  } else {
+    drawW = height * sourceRatio;
+  }
+  const dx = (width - drawW) / 2;
+  const dy = (height - drawH) / 2;
+
+  // 给主体图加轻微暗色描边/阴影，提升浅色和深色模式下的可读性。
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.34)";
+  ctx.shadowBlur = 34;
+  ctx.shadowOffsetY = 8;
+  ctx.drawImage(image, dx, dy, drawW, drawH);
+  ctx.restore();
+
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function handleCustomBackgroundUpload(event) {
+  const file = event.currentTarget.files?.[0];
+  event.currentTarget.value = "";
+  if (!file) return;
+  try {
+    showToast("正在裁切并保存背景图...");
+    const url = await cropBackgroundFile(file);
+    applyCustomBackground(url);
+    await saveUiPreferences();
+    showToast("自定义背景已启用（深色模式）");
+  } catch (e) {
+    console.error("handleCustomBackgroundUpload", e);
+    showToast(e.message || "背景图处理失败");
+  }
 }
 
 async function init() {
@@ -171,6 +349,9 @@ async function init() {
   });
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
   document.getElementById("appearanceToggleBtn")?.addEventListener("click", cycleAppearanceMode);
+  document.getElementById("customBackgroundBtn")?.addEventListener("click", handleBackgroundButtonClick);
+  document.getElementById("customBackgroundInput")?.addEventListener("change", handleCustomBackgroundUpload);
+  document.getElementById("presetBackgroundBtn")?.addEventListener("click", switchToPresetBackground);
   document.getElementById("refreshGroupsBtn")?.addEventListener("click", async () => {
     await loadContacts();
     showToast("群聊/私聊列表已刷新");
@@ -410,17 +591,13 @@ function renderToolGroupCards() {
       const rows = tools.map(tool => {
         const checked = !disabled.has(tool.id);
         return `
-          <label class="tool-card">
+          <button class="tool-card tool-action ${checked ? "enabled" : "disabled"}" type="button" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(groupName)}" aria-pressed="${checked ? "true" : "false"}">
             <div class="tool-emoji">${emojiForName(tool.name || tool.id)}</div>
             <div class="tool-copy">
               <div class="tool-name">${escapeHtml(tool.name)}</div>
               <div class="tool-desc">${escapeHtml(tool.desc)}</div>
             </div>
-            <span class="switch">
-              <input class="tool-toggle" type="checkbox" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(groupName)}" ${checked ? "checked" : ""}>
-              <span class="switch-track"></span><span class="switch-thumb"></span>
-            </span>
-          </label>`;
+          </button>`;
       }).join("");
       const card = `
         <section class="group-card">
@@ -449,17 +626,18 @@ function bindConfigEvents() {
     input.addEventListener("change", event => {
       const groupName = event.currentTarget.dataset.group;
       currentConfig.tool_groups[groupName] = event.currentTarget.checked;
-      document.querySelectorAll(`.tool-toggle[data-group-name="${CSS.escape(groupName)}"]`).forEach(toolToggle => {
-        toolToggle.checked = event.currentTarget.checked;
-        setToolDisabled(toolToggle.dataset.tool, !event.currentTarget.checked);
+      asToolItems(toolGroupsDef[groupName] || []).forEach(tool => {
+        setToolDisabled(tool.id, !event.currentTarget.checked);
       });
       renderConfigPanel();
     });
   });
 
-  document.querySelectorAll(".tool-toggle").forEach(input => {
-    input.addEventListener("change", event => {
-      setToolDisabled(event.currentTarget.dataset.tool, !event.currentTarget.checked);
+  document.querySelectorAll(".tool-action").forEach(button => {
+    button.addEventListener("click", event => {
+      const toolId = event.currentTarget.dataset.tool;
+      const disabledSet = new Set(currentConfig.disabled_tools || []);
+      setToolDisabled(toolId, !disabledSet.has(toolId));
       renderConfigPanel();
     });
   });
