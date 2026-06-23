@@ -50,7 +50,7 @@ class TestRegistryStatic:
 
         assert grouped == set(all_tools)
         assert len(groups) == 10
-        assert len(all_tools) == 64
+        assert len(all_tools) == 65
         assert sum(len(names) for names in groups.values()) == 64
 
     def test_new_v250_tools_registered(self):
