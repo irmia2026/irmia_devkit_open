@@ -24,6 +24,10 @@ def reset_session() -> str:
     return _SESSION_ID
 _SENSITIVE_KEYS = ("token", "secret", "password", "passwd", "pwd", "key", "private_key", "credential", "api_key", "authorization", "cookie")
 
+# 内容型参数名标记：匹配到时，超过 80 字符的字符串值不存原文，
+# 仅存长度摘要 <str N chars>，避免 safe_edit 的 old/new 等大量文本回流上下文。
+_CONTENT_KEY_MARKERS = ("old", "new", "content", "text", "body", "source", "data", "patch", "diff", "stdin", "code", "snippet", "description", "message", "output", "input")
+
 
 def _db_path() -> Path:
     cfg = get_config()
@@ -80,6 +84,9 @@ def _redact_value(key: str, value: Any) -> Any:
     if any(marker in parts for marker in _SENSITIVE_KEYS):
         return "<redacted>"
     if isinstance(value, str):
+        # 内容型参数：超过阈值后只存长度摘要，不存原文
+        if len(value) > 80 and any(marker in parts for marker in _CONTENT_KEY_MARKERS):
+            return f"<str {len(value)} chars>"
         return value if len(value) <= 160 else value[:157] + "..."
     if isinstance(value, (int, float, bool)) or value is None:
         return value
@@ -239,6 +246,20 @@ def query(action: str = "recent", limit: int = 10, file: str = "", tool: str = "
             ).fetchall()
             return {"ok": True, "total_entries": total, "sessions": sessions, "file": file, "entries": _rows_to_dicts(rows)}
         if action == "stats":
+            # 整体聚合
+            agg = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN result='ok' THEN 1 ELSE 0 END) AS ok_count, "
+                "SUM(CASE WHEN result='error' THEN 1 ELSE 0 END) AS error_count, "
+                "SUM(CASE WHEN result='timeout' THEN 1 ELSE 0 END) AS timeout_count, "
+                "AVG(duration_ms) AS avg_duration_ms "
+                "FROM op_log"
+            ).fetchone()
+            total_calls = agg["total"]
+            ok_count = agg["ok_count"] or 0
+            error_count = agg["error_count"] or 0
+            timeout_count = agg["timeout_count"] or 0
+            # 按工具细分
             rows = conn.execute(
                 "SELECT tool_name, result, COUNT(*) AS count, AVG(duration_ms) AS avg_duration_ms "
                 "FROM op_log GROUP BY tool_name, result ORDER BY count DESC LIMIT ?",
@@ -248,6 +269,12 @@ def query(action: str = "recent", limit: int = 10, file: str = "", tool: str = "
                 "ok": True,
                 "total_entries": total,
                 "sessions": sessions,
+                "total_calls": total_calls,
+                "ok_count": ok_count,
+                "error_count": error_count,
+                "timeout_count": timeout_count,
+                "success_rate": round(ok_count / max(total_calls, 1) * 100, 1),
+                "avg_duration_ms": round(agg["avg_duration_ms"] or 0, 1),
                 "stats": _rows_to_dicts(rows),
                 "duration_s": round(time.monotonic() - start, 3),
             }

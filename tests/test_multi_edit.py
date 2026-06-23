@@ -103,3 +103,12 @@ class TestMultiEdit:
         r = run([])
         assert r["ok"] is False
         assert "non-empty list" in r["error"]
+
+    def test_path_traversal_blocked(self, tmp_file):
+        """.. 穿越应在 resolve 之前被 check_path_allowed 拦截。"""
+        from pathlib import Path
+        base = Path(tmp_file).parent
+        traversal = f"{base}/subdir/../../{base.name}/target.txt"
+        r = run([{"file": traversal, "old": "x", "new": "y"}])
+        assert r["ok"] is False
+        assert "穿越" in r["error"]

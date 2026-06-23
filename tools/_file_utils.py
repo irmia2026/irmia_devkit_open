@@ -318,25 +318,25 @@ def find_closest_line(content: str, old: str, threshold: float = 0.5) -> dict | 
 
 def align_whitespace(content: str, old: str, new: str) -> tuple[str, str] | None:
     """Whitespace-tolerant fallback matching (P0-1).
-    当精确匹配失败时，尝试对齐 old/new 的行首空白与 content 中匹配的位置。
+    当精确匹配失败时，尝试对齐 old/new 的行首/行尾空白与 content 中匹配的位置。
     返回 (aligned_old, aligned_new) 或 None。
     对标 Aider 的 replace_part_with_missing_leading_whitespace()。
     """
     old_lines = old.split("\n")
     content_lines = content.split("\n")
-    # 去掉行首空白后的 old 文本
-    old_stripped = [l.lstrip() for l in old_lines]
+    # 去掉行首行尾空白后的 old 文本
+    old_stripped = [l.strip() for l in old_lines]
     if not old_stripped or not old_stripped[0]:
         return None
     # 在 content 中逐行查找匹配的第一个 stripped 行
     for i, cl in enumerate(content_lines):
-        if cl.lstrip() == old_stripped[0]:
+        if cl.strip() == old_stripped[0]:
             # 检查后续行是否匹配
             if i + len(old_lines) > len(content_lines):
                 continue
             match = True
             for j in range(1, len(old_lines)):
-                if content_lines[i + j].lstrip() != old_stripped[j]:
+                if content_lines[i + j].strip() != old_stripped[j]:
                     match = False
                     break
             if match:

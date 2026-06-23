@@ -304,7 +304,7 @@ def _read_lines_range(
                 continue
 
             if current_line + 1 > end:
-                # 小文件继续精确统计总行数；大文件保持已计数值，由 has_more 表达未读完
+                # 小文件继续精确统计总行数；大文件保持已计数值
                 if file_size <= _SMALL_FILE_THRESHOLD:
                     for _ in f:
                         total_lines += 1
@@ -322,6 +322,14 @@ def _read_lines_range(
                 for _ in f:
                     total_lines += 1
                 break
+
+    # 大文件因 max_lines 截断时，total_lines 只统计了已遍历行数，
+    # 用估算补全，避免 _build_next_call_and_options 误判 end>=total
+    # 导致 next_call 消失（此时文件可能还有大量未读行）。
+    if hit_limit and file_size > _SMALL_FILE_THRESHOLD:
+        estimated = _estimate_line_count(p, file_size, encoding)
+        if estimated > total_lines:
+            total_lines = estimated
 
     actual_start = start if start <= total_lines or (hit_limit and lines) else 0
     actual_end = actual_start + len(lines) - 1 if lines else 0

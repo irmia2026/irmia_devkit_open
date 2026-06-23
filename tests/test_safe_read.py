@@ -525,6 +525,38 @@ class TestFileReadHeadPerformance:
         assert result["total_lines"] > 10000
 
 
+class TestLargeFilePaginationNextCall:
+    """回归 Bug：大文件 range 模式 next_call 不应消失。"""
+
+    def test_default_range_on_large_file_has_next_call(self, tmp_dir):
+        """大文件从开头用 max_lines 读取时 next_call 不能为 None。"""
+        f = Path(tmp_dir) / "big.txt"
+        # ~1.6MB, ~10000 lines
+        f.write_text("\n".join(f"line {i:05d} " + "x" * 130 for i in range(10000)), encoding="utf-8")
+        assert f.stat().st_size > 1024 * 1024  # >1MB threshold
+
+        result = safe_read.read(str(f), max_lines=200)
+        assert result["ok"] is True
+        assert result["has_more"] is True
+        assert result["next_call"] is not None, \
+            "大文件截断时 next_call 不应为 None（否则 LLM 无法继续读取）"
+        assert result["next_call"]["tool"] == "safe_read"
+        assert result["next_call"]["args"]["start_line"] == 201
+
+    def test_mid_file_range_on_large_file_has_next_call(self, tmp_dir):
+        """大文件从中间用 max_lines 读取时 next_call 不能为 None。"""
+        f = Path(tmp_dir) / "big.txt"
+        f.write_text("\n".join(f"line {i:05d} " + "x" * 130 for i in range(10000)), encoding="utf-8")
+        assert f.stat().st_size > 1024 * 1024
+
+        result = safe_read.read(str(f), start_line=5000, max_lines=50)
+        assert result["ok"] is True
+        assert result["has_more"] is True
+        assert result["next_call"] is not None, \
+            "大文件中间截断时 next_call 不应为 None"
+        assert result["next_call"]["args"]["start_line"] == 5050
+
+
 class TestFindClosestLineIndent:
     """find_closest_line 应保留缩进提示。"""
 

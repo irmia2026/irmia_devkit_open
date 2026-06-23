@@ -102,6 +102,30 @@ class TestSafeEdit:
         content = Path(python_file).read_bytes()
         assert content == b"x = 1\r\ny = 2\r\nz = 1\r\n"
 
+    def test_crlf_file_multi_line_lf_old_default(self, python_file):
+        """CRLF 文件 + LF 多行 old → 默认单次替换成功（回归 Bug A）。"""
+        Path(python_file).write_bytes(b"x = 1\r\ny = 2\r\nprint(x + y)\r\n")
+        result = edit(python_file, "x = 1\ny = 2", "x = 10\ny = 20")
+        assert result["ok"] is True
+        content = Path(python_file).read_bytes()
+        assert content == b"x = 10\r\ny = 20\r\nprint(x + y)\r\n"
+
+    def test_crlf_file_multi_line_lf_old_occurrence(self, python_file):
+        """CRLF 文件 + LF 多行 old + occurrence=N。"""
+        Path(python_file).write_bytes(b"a = 1\r\nb = 2\r\na = 1\r\nb = 2\r\n")
+        result = edit(python_file, "a = 1\nb = 2", "a = 9\nb = 9", occurrence=2)
+        assert result["ok"] is True
+        content = Path(python_file).read_bytes()
+        assert content == b"a = 1\r\nb = 2\r\na = 9\r\nb = 9\r\n"
+
+    def test_crlf_file_multi_line_lf_old_replace_all(self, python_file):
+        """CRLF 文件 + LF 多行 old + replace_all=True。"""
+        Path(python_file).write_bytes(b"a = 1\r\nb = 2\r\na = 1\r\nb = 2\r\n")
+        result = edit(python_file, "a = 1\nb = 2", "a = 9\nb = 9", replace_all=True)
+        assert result["ok"] is True
+        content = Path(python_file).read_bytes()
+        assert content == b"a = 9\r\nb = 9\r\na = 9\r\nb = 9\r\n"
+
     @pytest.mark.skipif(sys.platform != "win32", reason="Windows 系统路径测试")
     def test_path_sandbox_rejects_system(self, python_file):
         """尝试编辑系统目录文件应被沙箱拒绝。"""
@@ -144,6 +168,37 @@ class TestSafeEdit:
             assert Path(path).read_bytes() == b"    a = 2\n    b = 2\n"
         finally:
             os.unlink(path)
+
+    def test_trailing_whitespace_tolerance(self, python_file):
+        """文件有尾随空格 + old 不带尾随空格 → align_whitespace 应容错匹配。"""
+        from pathlib import Path
+        Path(python_file).write_text("x = 1   \ny = 2\nprint(x + y)\n")
+        # old 无尾随空格
+        result = edit(python_file, "x = 1\ny = 2", "x = 10\ny = 20")
+        assert result["ok"] is True
+        content = Path(python_file).read_text()
+        assert "x = 10" in content
+
+    def test_trailing_whitespace_occurrence(self, python_file):
+        """尾随空格 + occurrence=N 也应容错匹配。
+        old 的对齐行尾空格会被替换掉（属于被替换的旧内容）。"""
+        from pathlib import Path
+        Path(python_file).write_text("a = 1   \nb = 2\na = 1   \nb = 2\n")
+        result = edit(python_file, "a = 1\nb = 2", "a = 9\nb = 9", occurrence=2)
+        assert result["ok"] is True
+        content = Path(python_file).read_text()
+        # 第 1 组不动，行尾空格保留；第 2 组被替换，行尾空格不保留
+        assert content == "a = 1   \nb = 2\na = 9\nb = 9\n"
+
+    def test_trailing_whitespace_replace_all(self, python_file):
+        """尾随空格 + replace_all=True 也应容错匹配。
+        old 的对齐行尾空格会被替换掉。"""
+        from pathlib import Path
+        Path(python_file).write_text("a = 1   \nb = 2\na = 1   \nb = 2\n")
+        result = edit(python_file, "a = 1\nb = 2", "a = 9\nb = 9", replace_all=True)
+        assert result["ok"] is True
+        content = Path(python_file).read_text()
+        assert content == "a = 9\nb = 9\na = 9\nb = 9\n"
 
     def test_rollback_nonexistent_file(self, tmp_dir):
         """rollback 不存在的文件应返回友好错误。"""

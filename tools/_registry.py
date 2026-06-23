@@ -99,7 +99,7 @@ from .symbol_rename import run as _symbol_rename_run
 from .tool_stats import snapshot as _tool_stats_snap
 from .db_query import query as _db_query
 from .dep_scan import scan as _dep_scan
-from .file_remove import remove as _file_remove
+from .file_remove import remove as _file_remove, move as _file_move
 from .safe_read import read as _safe_read
 
 # ── codegraph ──
@@ -1759,6 +1759,30 @@ FileRemoveTool = make_tool(
 )
 
 
+FileMoveTool = make_tool(
+    "file_move",
+    "【批量移动文件/目录首选】将多个文件或目录移动到目标目录。同分区内原子 rename（瞬间完成），跨分区自动 copy+delete。适合重构代码结构、整理目录。避免 agent 用 shell_exec mv 逐文件移动导致超时。",
+    {
+            "type": "object",
+            "properties": {
+                "sources": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "要移动的源文件/目录路径列表",
+                },
+                "dest": {"type": "string", "description": "目标目录路径（会自动创建）"},
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "是否覆盖目标已存在的文件",
+                    "default": False,
+                },
+            },
+            "required": ["sources", "dest"],
+        },
+    _file_move,
+)
+
+
 # ══ codegraph ══
 
 CodeIndexTool = make_tool(
@@ -1901,6 +1925,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "file_unzip",
         "disk_info",
         "file_remove",
+        "file_move",
         "config_diff",
         "safe_read",
     ],
@@ -1973,6 +1998,7 @@ _ALL_TOOLS = {
     "file_unzip": FileUnzipTool,
     "disk_info": DiskInfoTool,
     "file_remove": FileRemoveTool,
+    "file_move": FileMoveTool,
     "config_diff": ConfigDiffTool,
     "safe_read": FileReadTool,
     "port_check": PortCheckTool,

@@ -51,6 +51,16 @@ def _collect_positions(content: str, old: str) -> list[int]:
     return positions
 
 
+def _normalize_line_endings(s: str) -> str:
+    """统一把 \\r\\n 转成 \\n，方便跨换行风格匹配。"""
+    return s.replace("\r\n", "\n")
+
+
+def _restore_line_endings(s: str, has_crlf: bool) -> str:
+    """如果原文件是 CRLF，把结果再转回 CRLF。"""
+    return s.replace("\n", "\r\n") if has_crlf else s
+
+
 def edit(
     filepath: str, old: str, new: str, replace_all: bool = False, occurrence: int = 0
 ) -> dict:
@@ -75,6 +85,8 @@ def edit(
     if not old:
         return {"ok": False, "error": "old 参数不能为空字符串，空替换会损毁文件"}
 
+    # 路径安全校验：check_path_allowed 内部先检测原始字符串 .. 穿越，
+    # 再 resolve 后检测系统目录（含符号链接跟随）。
     safety = check_path_allowed(filepath)
     if safety:
         return safety
@@ -106,7 +118,15 @@ def edit(
     except Exception as e:
         return {"ok": False, "error": f"无法解码文件: {e}"}
 
-    # 0.1 消歧
+    # 0.1 CRLF → LF 归一化（与 file_patch / multi_edit 一致），
+    #     确保 CRLF 文件 + LF 多行 old 也能匹配
+    has_crlf = "\r\n" in content
+    if has_crlf:
+        content = _normalize_line_endings(content)
+        old = _normalize_line_endings(old)
+        new = _normalize_line_endings(new)
+
+    # 0.2 消歧
     old_count = content.count(old)
 
     if occurrence < 0:
@@ -164,6 +184,7 @@ def edit(
             "evidence": {"occurrence_count": old_count, "matches": positions[:20]},
             "matches": positions[:20],
             "occurrence_count": old_count,
+            **result_extra,
         }
 
     # 2. 执行替换前先校验 occurrence
@@ -198,9 +219,11 @@ def edit(
     if occurrence > 0 and not replace_all:
         positions = _collect_positions(content, old)
         idx = positions[occurrence - 1]
-        content = content[:idx] + new + content[idx + len(old) :]
+        new_content = content[:idx] + new + content[idx + len(old) :]
+        if has_crlf:
+            new_content = _restore_line_endings(new_content, has_crlf)
         try:
-            atomic_write_text(filepath, content, encoding)
+            atomic_write_text(filepath, new_content, encoding)
         except (OSError, UnicodeError) as e:
             return {"ok": False, "error": f"无法写入文件：{e}"}
         result["replaced"] = 1
@@ -296,7 +319,12 @@ def rollback(filepath: str, backup_name: str | None = None) -> dict:
     """
     回滚文件到指定备份。不指定则回滚到最近的备份。
     """
-    p = Path(filepath)
+    safety = check_path_allowed(filepath)
+    if safety:
+        return safety
+
+    p = Path(filepath).resolve()
+    filepath = str(p)
 
     if not p.exists():
         return {"ok": False, "error": f"目标文件不存在: {filepath}"}

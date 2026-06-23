@@ -134,6 +134,30 @@ class TestAlignWhitespace:
     def test_empty_old_returns_none(self):
         assert fu.align_whitespace("x", "", "y") is None
 
+    def test_trailing_whitespace_tolerance(self):
+        """行尾空格差异应像行首空格一样被容错匹配，
+        但 aligned_new 不继承 old 的行尾空格（那是被替换的内容）。"""
+        content = "def foo():   \n    pass\n"
+        old = "def foo():\n    pass"
+        new = "def foo():\n    return 1"
+        aligned = fu.align_whitespace(content, old, new)
+        assert aligned is not None
+        aligned_old, aligned_new = aligned
+        assert aligned_old == "def foo():   \n    pass"
+        # aligned_new 只继承行首缩进，不继承行尾空格
+        assert aligned_new == "def foo():\n    return 1"
+
+    def test_trailing_whitespace_mismatch_still_matches(self):
+        """行尾空格数量不同时仍应匹配。"""
+        content = "x = 1     \ny = 2\n"
+        old = "x = 1\ny = 2"
+        new = "x = 10\ny = 20"
+        aligned = fu.align_whitespace(content, old, new)
+        assert aligned is not None
+        aligned_old, aligned_new = aligned
+        assert aligned_old.rstrip("\n") == "x = 1     \ny = 2"
+        assert aligned_new.rstrip("\n") == "x = 10\ny = 20"
+
 
 class TestAtomicWriteText:
     def test_writes_content(self, tmp_dir):

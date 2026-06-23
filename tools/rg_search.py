@@ -107,6 +107,7 @@ def _python_fallback(
     case_sensitive: bool,
     whole_word: bool,
     list_files: bool,
+    context_lines: int = 0,
 ) -> dict:
     """Python 纯标准库内容搜索 fallback。"""
     # ReDoS 前置拦截
@@ -136,9 +137,11 @@ def _python_fallback(
         return {"ok": False, "error": f"正则表达式无效: {e}"}
 
     matches = []
+    seen_files = {}          # ordered dict for list_files dedup (O(1) add, preserves discovery order)
     files_searched = 0
     truncated = False
     search_steps = 0
+    use_context = context_lines > 0 and not list_files
 
     for root, dirs, files in os.walk(search_path):
         # 跳过隐藏/非代码目录
@@ -158,26 +161,62 @@ def _python_fallback(
             files_searched += 1
             fpath = os.path.join(root, fname)
             try:
-                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                    for lineno, line in enumerate(f, 1):
+                if use_context:
+                    # 上下文模式：读入整个文件以收集匹配行前后文
+                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                        file_lines = []
+                        for fl in f:
+                            file_lines.append(fl)
+                            if len(file_lines) > _MAX_TOTAL_SEARCH_STEPS:
+                                break
+                    for i, line in enumerate(file_lines):
                         search_steps += 1
                         if search_steps > _MAX_TOTAL_SEARCH_STEPS:
                             truncated = True
                             break
                         if compiled.search(line):
+                            ctx_start = max(0, i - context_lines)
+                            ctx_end = min(len(file_lines), i + context_lines + 1)
+                            context = [
+                                {"line": j + 1, "content": file_lines[j].rstrip("\n").rstrip("\r")[:200]}
+                                for j in range(ctx_start, ctx_end) if j != i
+                            ]
                             matches.append({
                                 "file": fpath,
-                                "line": lineno,
+                                "line": i + 1,
                                 "content": line.strip()[:200],
+                                "context": context,
                             })
-                            if list_files:
-                                unique_files = len(set(m["file"] for m in matches))
-                                if unique_files >= max_results:
-                                    truncated = True
-                                    break
-                            elif len(matches) >= max_results:
+                            if len(matches) >= max_results:
                                 truncated = True
                                 break
+                    if truncated:
+                        break
+                else:
+                    # 无上下文 / list_files：流式逐行扫描
+                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                        for lineno, line in enumerate(f, 1):
+                            search_steps += 1
+                            if search_steps > _MAX_TOTAL_SEARCH_STEPS:
+                                truncated = True
+                                break
+                            if compiled.search(line):
+                                if list_files:
+                                    seen_files[fpath] = True
+                                    if len(seen_files) >= max_results:
+                                        truncated = True
+                                        break
+                                else:
+                                    matches.append({
+                                        "file": fpath,
+                                        "line": lineno,
+                                        "content": line.strip()[:200],
+                                    })
+                                    if len(matches) >= max_results:
+                                        truncated = True
+                                        break
+                    if truncated:
+                        break
             except (OSError, PermissionError):
                 continue
 
@@ -187,13 +226,7 @@ def _python_fallback(
             break
 
     if list_files:
-        seen = set()
-        unique = []
-        for m in matches:
-            if m["file"] not in seen:
-                seen.add(m["file"])
-                unique.append(m)
-        matches = [{"file": m["file"]} for m in unique]
+        matches = [{"file": f} for f in seen_files]
 
     result = {
         "ok": True,
@@ -328,4 +361,5 @@ def search(
     return _python_fallback(
         pattern, search_path, exts, max_results,
         case_sensitive, whole_word, list_files,
+        context_lines=context_lines,
     )

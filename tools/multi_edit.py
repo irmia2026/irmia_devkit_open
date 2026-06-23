@@ -156,10 +156,12 @@ def run(edits: list, syntax_check: bool = True) -> dict:
             raw_file = item.get("file") or item.get("filepath")
             if not raw_file:
                 return {"ok": False, "error": f"edit #{i}: file is required"}
-            path = Path(raw_file).resolve()
-            err = check_path_allowed(path)
+            # 先对原始字符串做路径安全检查（.. 穿越 / 系统目录），
+            # 再 resolve 供内部使用（与 safe_edit 一致的顺序）。
+            err = check_path_allowed(raw_file)
             if err:
                 return err
+            path = Path(raw_file).resolve()
             if not path.exists() or not path.is_file():
                 return {"ok": False, "error": f"edit #{i}: file does not exist: {raw_file}"}
             if path.stat().st_size > SAFE_EDIT_MAX_SIZE:
