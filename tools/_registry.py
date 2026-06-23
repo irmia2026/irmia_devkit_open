@@ -1694,7 +1694,7 @@ OpLogTool = make_tool(
                 },
                 "limit": {"type": "integer", "description": "最多返回条数，默认 10", "default": 10},
                 "file": {"type": "string", "description": "action=file 时的文件名/路径片段", "default": ""},
-                "tool": {"type": "string", "description": "按工具名过滤 recent", "default": ""},
+                "tool_name": {"type": "string", "description": "按工具名过滤 recent", "default": ""},
                 "session_id": {"type": "string", "description": "按会话过滤 recent", "default": ""},
             },
             "required": [],

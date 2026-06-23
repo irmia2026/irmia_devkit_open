@@ -205,7 +205,7 @@ def _clamp_limit(limit: int) -> int:
     return max(1, min(limit, 100))
 
 
-def query(action: str = "recent", limit: int = 10, file: str = "", tool: str = "", session_id: str = "") -> dict:
+def query(action: str = "recent", limit: int = 10, file: str = "", tool_name: str = "", session_id: str = "") -> dict:
     action = (action or "recent").strip().lower()
     limit = _clamp_limit(limit)
     start = time.monotonic()
@@ -216,9 +216,9 @@ def query(action: str = "recent", limit: int = 10, file: str = "", tool: str = "
         if action == "recent":
             clauses = []
             params: list[Any] = []
-            if tool:
+            if tool_name:
                 clauses.append("tool_name=?")
-                params.append(tool)
+                params.append(tool_name)
             if session_id:
                 clauses.append("session_id=?")
                 params.append(session_id)
