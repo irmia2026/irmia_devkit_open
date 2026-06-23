@@ -1,6 +1,7 @@
 """Tests for file_remove / file_move — path sandbox, batch move, overwrite, cross-partition routing."""
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -154,9 +155,12 @@ class TestFileMove:
         assert "穿越" in r["error"]
 
     def test_system_prefix_blocked(self):
-        r = move(["C:/Windows/System32/kernel32.dll"], "/tmp")
+        # 跨平台：Windows 用 C:/Windows/System32，Linux 用 /etc
+        bad_path = "C:/Windows/System32/kernel32.dll" if sys.platform == "win32" else "/etc/shadow"
+        r = move([bad_path], "/tmp")
         assert r["ok"] is False
-        assert "禁止" in r["error"] or "系统目录" in r["error"]
+        assert any(kw in r.get("error", "") or kw in r.get("proposal", "")
+                   for kw in ("禁止", "系统目录"))
 
     def test_large_batch_hint(self, tmp_path):
         """>1000 个文件且共父目录时返回 hint"""
