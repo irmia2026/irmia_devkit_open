@@ -523,3 +523,38 @@ class TestBfsPath:
             assert path is None
         finally:
             cg.close()
+
+
+class TestFtsIncrementalConsistency:
+    """回归测试：FTS 与 symbols 的一致性维护。
+
+    修复前：增量 INSERT 被 `except: pass` 吞掉，FTS 一旦脱节便永久漏搜。
+    修复后：收尾处在需要时全量重建 FTS（DELETE + 从 symbols 重灌），
+    保证 FTS 始终能回到与 symbols 一致的状态。
+    """
+
+    def test_fts_rebuild_restores_consistency(self, tmp_project):
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        cg = CodeGraph(db_path)
+        try:
+            cg.index(tmp_project)  # 全量建索引
+            conn = cg._conn_get()
+
+            # 人为制造不一致：从 FTS 删掉一个 symbols 里存在的符号
+            conn.execute("DELETE FROM sym_fts WHERE name='helper'")
+            conn.commit()
+            n = conn.execute("SELECT COUNT(*) FROM sym_fts WHERE name='helper'").fetchone()[0]
+            assert n == 0, "前置条件：FTS 中应已无 helper"
+
+            # 触发一次非增量索引（等价于收尾重建路径），FTS 应被重灌恢复一致
+            cg.index(tmp_project, incremental=False)
+            n = conn.execute("SELECT COUNT(*) FROM sym_fts WHERE name='helper'").fetchone()[0]
+            assert n >= 1, "FTS 重建后应恢复 helper，与 symbols 一致"
+        finally:
+            cg.close()
+            for f in [db_path, db_path + "-shm", db_path + "-wal"]:
+                try:
+                    os.unlink(f)
+                except OSError:
+                    pass

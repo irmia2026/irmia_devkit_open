@@ -286,6 +286,7 @@ class CodeGraph:
         changed_count = len(changed_files)
 
         # ── Parallel parsing + single-threaded batch write ──
+        fts_need_rebuild = False
         if changed_count > 0:
             worker_args = [(str(f), f.suffix.lower(), str(root)) for f in changed_files]
 
@@ -338,9 +339,12 @@ class CodeGraph:
                             "INSERT INTO sym_fts(name, file, signature) VALUES(?, ?, ?)",
                             [(s["name"], rp, s.get("signature", "")) for s in symbols],
                         )
-                    except Exception:
-                        pass
-                
+                    except Exception as exc:
+                        # 不再静默吞掉：标记后于收尾处全量重建 FTS，
+                        # 否则增量只删不补会让 FTS 与 symbols 表永久脱节、搜索漏结果。
+                        fts_need_rebuild = True
+                        logger.warning("codegraph: incremental FTS insert failed for %s, will rebuild FTS: %s", rp, exc)
+
                 stats["symbols"] += len(symbols)
                 stats["edges"] += len(edges)
                 stats["files"] += 1
@@ -351,13 +355,15 @@ class CodeGraph:
                                        "progress": f"{stats['files']}/{total_files}",
                                        "elapsed_s": round(time.time() - start, 1)})
             
-            # Full FTS5 rebuild if not incremental or too many changes
-            if not incremental or changed_count >= total_files * 0.5:
+            # Full FTS5 rebuild if not incremental or too many changes,
+            # or an incremental FTS insert failed (consistency fallback).
+            if not incremental or fts_need_rebuild or changed_count >= total_files * 0.5:
                 try:
                     conn.execute("DELETE FROM sym_fts")
                     conn.execute("INSERT INTO sym_fts(name, file, signature) SELECT name, file, signature FROM symbols")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # 重建失败必须可见：FTS 已与 symbols 脱节，后续搜索不可靠。
+                    logger.error("codegraph: FTS rebuild failed, full-text search may be inconsistent: %s", exc, exc_info=True)
 
         try:
             _resolve_references(conn)

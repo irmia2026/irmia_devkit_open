@@ -54,7 +54,7 @@ class TestRegistryConsistency:
             )
 
     def test_total_tool_count(self):
-        """_ALL_TOOLS 总数应为 64（v2.6.0 新增 safe_read）"""
+        """_ALL_TOOLS 总数应为 64（v2.6.0 新增 safe_read，v2.6.1 FTS/TOCTOU/编码修复）"""
         assert len(_ALL_TOOLS) == 64
 
     def test_no_duplicate_tool_names(self):

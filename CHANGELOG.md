@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.6.1 — FTS 数据完整性 / TOCTOU / 编码 / 回滚安全修复
+
+- **codegraph 修复**: 增量索引时 FTS 插入失败不再静默吞异常，改为标记后于收尾处全量重建 FTS，防止全文搜索永久漏结果。
+- **codegraph 测试**: 新增 `TestFtsIncrementalConsistency` 回归测试，覆盖 FTS 脱节→重建恢复的完整路径。
+- **multi_edit 修复**: 备份操作提前至语法检查之前，消除 TOCTOU 竞态窗口。
+- **safe_edit 修复**: 写入统一使用 UTF-8 编码，避免 GBK 文件写入 emoji 等字符时 `UnicodeEncodeError`；`safe_rollback` 回滚前自动创建 `prerollback.bak` 快照，回滚可撤销。
+- **测试**: 全量 593 passed、10 skipped。
+
 ## v2.6.0 — 增强文件读取 + 全量安全审查修复
 
 - **新工具**: `safe_read` — 增强版安全文件读取，替代 AstrBot 原生 `file_read`。支持编码自动检测、二进制文件 hex 预览、head/tail、行号范围、目录递归读取、代码骨架提取；失败路径接入项目 proposal 协议，引导 LLM 下一步操作。

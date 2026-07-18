@@ -189,6 +189,22 @@ def run(edits: list, syntax_check: bool = True) -> dict:
             "rolled_back_all": True,
         }
 
+    # 先备份原文件（快照），再做语法检查，最后原子提交。
+    # 顺序不能颠倒：若先语法检查后备份，检查期间文件被外界改动会备份到错误内容（TOCTOU）。
+    backups: dict[Path, Path] = {}
+    try:
+        for path in files:
+            backups[path] = _backup_file(path)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"backup failed: {exc}",
+            "applied": [],
+            "total_requested": len(edits),
+            "total_applied": 0,
+            "rolled_back_all": True,
+        }
+
     if syntax_check:
         for path, data in files.items():
             result = _syntax_check_temp(path, data["content"], data["encoding"])
@@ -203,11 +219,9 @@ def run(edits: list, syntax_check: bool = True) -> dict:
                     "rolled_back_all": True,
                 }
 
-    backups: dict[Path, Path] = {}
     tmp_paths: dict[Path, Path] = {}
     try:
         for path, data in files.items():
-            backups[path] = _backup_file(path)
             fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent), text=True)
             final_content = data["content"].replace("\n", "\r\n") if data["has_crlf"] else data["content"]
             with os.fdopen(fd, "w", encoding=data["encoding"], newline="") as f:
