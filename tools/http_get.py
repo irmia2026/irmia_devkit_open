@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import threading
 
+import re
 import urllib.request
 import urllib.error
 import json
@@ -114,7 +115,6 @@ def _convert_html(html: str, format: str, extract: bool) -> str:
             from markdownify import markdownify as md
             text = md(h, heading_style="ATX", strip=["script", "style"])
             if format == "text":
-                import re
                 text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
                 text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
                 text = re.sub(r"\*(.+?)\*", r"\1", text)

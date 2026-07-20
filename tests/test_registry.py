@@ -38,7 +38,7 @@ class TestRegistryConsistency:
         expected = {
             "安全编辑链": 10,
             "Git & GitHub": 11,
-            "文件系统": 12,
+            "文件系统": 13,
             "系统信息": 4,
             "执行与审计": 2,
             "网络": 3,
@@ -54,8 +54,8 @@ class TestRegistryConsistency:
             )
 
     def test_total_tool_count(self):
-        """_ALL_TOOLS 总数应为 64（v2.6.0 新增 safe_read，v2.6.3 http_get 分页翻页 + schema 一致性对齐）"""
-        assert len(_ALL_TOOLS) == 64
+        """_ALL_TOOLS 总数应为 65（v2.6.3 http_get 分页翻页 + schema 一致性对齐）"""
+        assert len(_ALL_TOOLS) == 65
 
     def test_no_duplicate_tool_names(self):
         """TOOL_GROUPS 中跨组不得重名"""
