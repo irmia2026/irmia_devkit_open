@@ -1,6 +1,6 @@
 [project]
 name = "astrbot_plugin_irmia_devkit"
-version = "2.6.2"
+version = "2.6.3"
 description = "弥亚开发工具箱 — 为 LLM Agent 提供安全的代码开发工具集"
 requires-python = ">=3.10"
 

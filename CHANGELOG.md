@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.6.3 — http_get 分页翻页 / 嵌套函数缩进修复 / schema 一致性对齐
+
+- **http_get 分页翻页**: 页大小 8000 字符，模块级 LRU 缓存（10 条），`offset` 参数切页；返回 `has_more` + `next_call` + `options` 三件套，agent 盲传即可翻页，不重复下载。
+- **http_get review 修复**: 缓存加 `threading.Lock`；`offset` 负值校验；`_read_limited` 截断判断 `>=` 修复边界漏报；`_extract_metadata` BS4 import 提升到 `except ImportError`。
+- **safe_edit/file_patch 修复**: 新增 `preserve_inner_indent` 参数（默认 True），缩进对齐改为 delta 平移法，保留嵌套 `def`/`class` 的内部缩进结构，修复替换时嵌套函数被压扁为同级的问题。
+- **schema 一致性**: 21 处工具 schema 与函数签名不一致全部修复 — `file_zip` 参数名 `files`→`files_or_dir`（修复运行时 TypeError）、`csv_gen` 类型修正、6 个漏注册参数补全、13 个工具的 `default` 标注补全、`required` 列表对齐。
+- **依赖整理**: `chardet` 提升为必装；`requirements.txt` 补全 `webfetch`/`codegraph`/`other` 可选依赖分组（trafilatura/markdownify/psutil/python-magic）。
+- **测试**: 19 passed (http_get)。
+
 ## v2.6.2 — http_get HTML→Markdown 正文提取
 
 - **http_get 增强**: 新增 `format` 参数（html|markdown|text），`extract` 参数（trafilatura 正文提取去广告）；三级降级（trafilatura→markdownify→BS4 纯文本），零依赖也能工作。

@@ -54,7 +54,7 @@ class TestRegistryConsistency:
             )
 
     def test_total_tool_count(self):
-        """_ALL_TOOLS 总数应为 64（v2.6.0 新增 safe_read，v2.6.2 http_get HTML→Markdown 增强）"""
+        """_ALL_TOOLS 总数应为 64（v2.6.0 新增 safe_read，v2.6.3 http_get 分页翻页 + schema 一致性对齐）"""
         assert len(_ALL_TOOLS) == 64
 
     def test_no_duplicate_tool_names(self):
