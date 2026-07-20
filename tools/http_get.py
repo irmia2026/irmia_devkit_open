@@ -5,6 +5,8 @@ http_get — 纯标准库 HTTP 客户端。
 """
 from __future__ import annotations
 
+from collections import OrderedDict
+
 import urllib.request
 import urllib.error
 import json
@@ -15,8 +17,34 @@ from ._http_utils import check_url, make_opener
 
 _MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5MB：超过此大小截断
 _MAX_RESPONSE_BODY = 5000  # format=html 返回给 LLM 的最大字符数
-_MAX_CONTENT_LENGTH = 20000  # format=markdown/text 返回给 LLM 的最大字符数
+_MAX_CONTENT_LENGTH = 8000  # format=markdown/text 每页最大字符数
+_PAGE_CACHE_SIZE = 10  # 最多缓存的页面数（LRU 淘汰）
 _DEFAULT_TIMEOUT = 15  # 默认超时秒数
+
+# ── 翻页缓存：key=(url, format, extract) → 完整转换结果 ──
+_page_cache: OrderedDict = OrderedDict()
+
+
+def _cache_key(url: str, format: str, extract: bool) -> tuple:
+    return (url, format, extract)
+
+
+def _get_cached(key: tuple) -> dict | None:
+    """命中缓存时返回并移到末尾（LRU）；未命中返回 None。"""
+    if key in _page_cache:
+        _page_cache.move_to_end(key)
+        return _page_cache[key]
+    return None
+
+
+def _set_cache(key: tuple, entry: dict) -> None:
+    """写入缓存，超过上限踢最旧的。"""
+    if key in _page_cache:
+        _page_cache.move_to_end(key)
+    else:
+        while len(_page_cache) >= _PAGE_CACHE_SIZE:
+            _page_cache.popitem(last=False)
+    _page_cache[key] = entry
 
 
 def _read_limited(resp, max_bytes: int = _MAX_RESPONSE_SIZE) -> str:
@@ -120,12 +148,12 @@ def _convert_html(html: str, format: str, extract: bool) -> str:
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "html.parser")
             except Exception:
-                return html[:2000]
+                return html[:_MAX_CONTENT_LENGTH * 3]
         for tag in soup(["script", "style"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-        return "\n".join(lines)[:20000]
+        return "\n".join(lines)
     else:
         # extract=False：全页 markdownify 转换
         try:
@@ -152,12 +180,57 @@ def _convert_html(html: str, format: str, extract: bool) -> str:
                 from bs4 import BeautifulSoup
                 soup = BeautifulSoup(html, "html.parser")
             except Exception:
-                return html[:2000]
+                return html[:_MAX_CONTENT_LENGTH * 3]
         for tag in soup(["script", "style"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-        return "\n".join(lines)[:20000]
+        return "\n".join(lines)
+
+
+def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) -> dict:
+    """从缓存的完整内容中切出一页，附 has_more / next_call / options。"""
+    content = entry["content"]
+    total = len(content)
+    page = content[offset:offset + _MAX_CONTENT_LENGTH]
+    has_more = offset + len(page) < total
+
+    next_call = None
+    options = []
+    if has_more:
+        next_offset = offset + len(page)
+        next_call = {
+            "tool": "http_get",
+            "args": {
+                "url": url,
+                "format": format,
+                "extract": extract,
+                "offset": next_offset,
+            },
+        }
+        options = [
+            f"继续阅读下一页 (offset={next_offset})",
+            "换个更精确的 URL 或减小范围",
+        ]
+
+    return {
+        "ok": True,
+        "status": entry["status"],
+        "url": url,
+        "title": entry["title"],
+        "description": entry["description"],
+        "content": page,
+        "content_length": len(page),
+        "format": format,
+        "extracted": extract,
+        "offset": offset,
+        "has_more": has_more,
+        "next_call": next_call,
+        "options": options,
+        "truncated": total > _MAX_CONTENT_LENGTH,
+        "truncation_reason": f"共 {total} 字符，当前展示 offset={offset}~{offset + len(page)}" if has_more else "",
+        "size": entry["size"],
+    }
 
 
 def _add_ua(req, headers: dict | None):
@@ -171,6 +244,7 @@ def get(
     format: str = "html",
     extract: bool = False,
     timeout: int = _DEFAULT_TIMEOUT,
+    offset: int = 0,
 ) -> dict:
     """HTTP GET 请求。
 
@@ -180,11 +254,13 @@ def get(
         format: 输出格式 — "html" | "markdown" | "text"，默认 "html"
         extract: True=先提取正文再转换（去广告/导航/页脚），False=全页转换，默认 False
         timeout: 超时秒数，默认 15
+        offset: 分页偏移量（字符数），0=从头读取。首次调用不传，后续通过 next_call 透传
 
     Returns:
         format="html" 时返回 {"ok", "status", "body", "truncated", "size"}
         format≠"html" 时返回 {"ok", "status", "url", "title", "description",
-                         "content", "content_length", "format", "extracted", "truncated", "size"}
+                         "content", "content_length", "format", "extracted",
+                         "offset", "has_more", "next_call", "options", "truncated", "size"}
     """
     err = check_url(url)
     if err:
@@ -211,23 +287,28 @@ def get(
                 return raw
 
             # format ∈ {"markdown", "text"}
+            key = _cache_key(url, format, extract)
+
+            # offset > 0：尝试从缓存翻页
+            if offset > 0:
+                cached = _get_cached(key)
+                if cached is not None and offset < len(cached["content"]):
+                    return _paginate(cached, offset, url, format, extract)
+                # 缓存未命中或 offset 越界：从头下载
+                offset = 0
+
+            # 首次请求：下载 + 转换 + 缓存
             meta = _extract_metadata(raw["body"])
             content = _convert_html(raw["body"], format, extract)
-            content_length = len(content)
-
-            return {
-                "ok": True,
+            entry = {
                 "status": raw["status"],
-                "url": url,
+                "size": raw["size"],
                 "title": meta["title"],
                 "description": meta["description"],
-                "content": content[:_MAX_CONTENT_LENGTH],
-                "content_length": min(content_length, _MAX_CONTENT_LENGTH),
-                "format": format,
-                "extracted": extract,
-                "truncated": raw["truncated"] or content_length > _MAX_CONTENT_LENGTH,
-                "size": raw["size"],
+                "content": content,
             }
+            _set_cache(key, entry)
+            return _paginate(entry, offset, url, format, extract)
     except urllib.error.HTTPError as e:
         body = ""
         try:

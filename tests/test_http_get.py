@@ -16,6 +16,20 @@ SAMPLE_HTML = (
     "<nav>Skip this nav</nav><footer>Footer</footer></body></html>"
 )
 
+# 构造超过 8000 字符的长 HTML，用于测试分页
+_LONG_BODY = "<p>" + ("long text. " * 3000) + "</p>"
+SAMPLE_HTML_LONG = (
+    "<html><head><title>Long Page</title>"
+    '<meta name="description" content="A very long page for pagination tests.">'
+    f"</head><body><h1>Start</h1>{_LONG_BODY}<h2>End</h2></body></html>"
+)
+
+
+def _clear_cache():
+    """清除 http_get 模块级缓存，避免测试间互相干扰。"""
+    from tools.http_get import _page_cache
+    _page_cache.clear()
+
 
 class FakeResponse:
     """模拟 urllib response 对象。"""
@@ -75,24 +89,24 @@ class TestHttpGet:
 
     def test_invalid_format(self, monkeypatch):
         """格式参数无效时应返回错误。"""
-        from tools import _http_utils as hu
+        from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
             return FakeResponse(SAMPLE_HTML.encode("utf-8"))
 
-        monkeypatch.setattr(hu, "make_opener", lambda: _fake_opener(fake_open))
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com", format="pdf")
         assert r["ok"] is False
         assert "format" in r["error"]
 
     def test_format_html_default(self, monkeypatch):
         """默认 format=html 保持向后兼容。"""
-        from tools import _http_utils as hu
+        from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
             return FakeResponse(SAMPLE_HTML.encode("utf-8"))
 
-        monkeypatch.setattr(hu, "make_opener", lambda: _fake_opener(fake_open))
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com")
         assert r["ok"] is True
         assert r["status"] == 200
@@ -143,6 +157,76 @@ class TestHttpGet:
         assert r["format"] == "text"
         assert r["extracted"] is True
         assert "content" in r
+
+    def test_format_markdown_has_more(self, monkeypatch):
+        """长内容应标记 has_more=true 并包含 next_call。"""
+        _clear_cache()
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert r["has_more"] is True
+        assert r["next_call"] is not None
+        assert r["next_call"]["tool"] == "http_get"
+        assert "offset" in r["next_call"]["args"]
+        assert "format" in r["next_call"]["args"]
+        assert "extract" in r["next_call"]["args"]
+        assert r["content_length"] <= 8000
+
+    def test_format_markdown_pagination(self, monkeypatch):
+        """分页翻页：第二页内容应与第一页不同。"""
+        _clear_cache()
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+
+        # 第一页
+        r1 = get("http://example.com", format="markdown")
+        assert r1["ok"] is True
+        assert r1["has_more"] is True
+        page1 = r1["content"]
+        next_offset = r1["next_call"]["args"]["offset"]
+
+        # 第二页
+        r2 = get("http://example.com", format="markdown", offset=next_offset)
+        assert r2["ok"] is True
+        page2 = r2["content"]
+        assert page1 != page2  # 内容不应相同
+        assert page2.startswith(page1[next_offset:next_offset + 20])  # 衔接正确
+
+    def test_format_markdown_no_has_more(self, monkeypatch):
+        """短内容不应标记 has_more。"""
+        _clear_cache()
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert r["has_more"] is False
+        assert r["next_call"] is None
+
+    def test_format_html_ignores_offset(self, monkeypatch):
+        """format=html 不受 offset 影响，保持向后兼容。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", offset=100)
+        assert r["ok"] is True
+        assert "body" in r
+        assert "has_more" not in r
 
 
 class TestHttpPost:

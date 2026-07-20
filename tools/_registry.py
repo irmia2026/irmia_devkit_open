@@ -567,6 +567,11 @@ HttpGetTool = make_tool(
                     "description": "超时秒数，默认 15",
                     "default": 15,
                 },
+                "offset": {
+                    "type": "integer",
+                    "description": "分页偏移量（字符数），0=从头读取。首次不用传，翻页时通过 next_call 透传",
+                    "default": 0,
+                },
             },
             "required": ["url"],
         },
