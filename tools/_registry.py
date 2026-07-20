@@ -465,10 +465,11 @@ GitPushTool = make_tool(
             "type": "object",
             "properties": {
                 "cwd": {"type": "string", "description": "Git 仓库路径"},
-                "remote": {"type": "string", "description": "远程名称，默认 origin"},
+                "remote": {"type": "string", "description": "远程名称，默认 origin", "default": "origin"},
                 "branch": {
                     "type": "string",
                     "description": "分支名，留空自动获取当前分支",
+                    "default": "",
                 },
             },
             "required": ["cwd"],
@@ -492,6 +493,7 @@ EsSearchTool = make_tool(
                 "path": {
                     "type": "string",
                     "description": "限定搜索目录路径。不传则全盘搜索",
+                    "default": "",
                 },
                 "max_results": {
                     "type": "integer",
@@ -542,12 +544,12 @@ RgSearchTool = make_tool(
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "搜索模式，正则或字面量"},
-                "path": {"type": "string", "description": "搜索起始目录，默认当前目录"},
-                "file_exts": {"type": "string", "description": "逗号分隔扩展名，如 'py,js,ts'（无点号）"},
-                "max_results": {"type": "integer", "description": "最大结果数，默认 40"},
-                "case_sensitive": {"type": "boolean", "description": "区分大小写"},
-                "whole_word": {"type": "boolean", "description": "全词匹配"},
-                "list_files": {"type": "boolean", "description": "是否只返回文件名列表"},
+                "path": {"type": "string", "description": "搜索起始目录，默认当前目录", "default": "."},
+                "file_exts": {"type": "string", "description": "逗号分隔扩展名，如 'py,js,ts'（无点号）", "default": ""},
+                "max_results": {"type": "integer", "description": "最大结果数，默认 40", "default": 40},
+                "case_sensitive": {"type": "boolean", "description": "区分大小写", "default": False},
+                "whole_word": {"type": "boolean", "description": "全词匹配", "default": False},
+                "list_files": {"type": "boolean", "description": "是否只返回文件名列表", "default": False},
                 "context_lines": {"type": "integer", "description": "匹配行周围展示的上下文行数，默认 0。设 2 则返回前后各 2 行", "default": 0},
             },
             "required": ["pattern"],
@@ -660,8 +662,9 @@ HttpDownloadTool = make_tool(
                 "overwrite": {
                     "type": "boolean",
                     "description": "是否覆盖已有文件，默认 false",
+                    "default": False,
                 },
-                "timeout": {"type": "integer", "description": "超时秒数，默认 60"},
+                "timeout": {"type": "integer", "description": "超时秒数，默认 60", "default": 60},
             },
             "required": ["url", "path"],
         },
@@ -681,13 +684,15 @@ HtmlExtractTool = make_tool(
                 "what": {
                     "type": "string",
                     "description": "提取类型: text / links / tables / query",
+                    "default": "text",
                 },
                 "selector": {
                     "type": "string",
                     "description": "CSS 选择器，what='query' 时必填",
+                    "default": "",
                 },
             },
-            "required": ["html", "what"],
+            "required": ["html"],
         },
     _html_extract,
 )
@@ -700,12 +705,18 @@ DirTreeTool = make_tool(
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "目录路径"},
-                "max_depth": {"type": "integer", "description": "最大递归深度，默认 3"},
+                "max_depth": {"type": "integer", "description": "最大递归深度，默认 3", "default": 3},
                 "show_hidden": {
                     "type": "boolean",
                     "description": "是否显示隐藏文件，默认 false",
+                    "default": False,
                 },
                 "pattern": {"type": "string", "description": "文件名过滤，如 '*.py'"},
+                "max_items": {
+                    "type": "integer",
+                    "description": "最大条目数，默认 100",
+                    "default": 100,
+                },
             },
             "required": ["path"],
         },
@@ -770,6 +781,7 @@ ProcListTool = make_tool(
                 "filter_name": {
                     "type": "string",
                     "description": "按进程名模糊过滤，如 'python' 'docker' 'node'",
+                    "default": None,
                 }
             },
             "required": [],
@@ -803,10 +815,10 @@ FileZipTool = make_tool(
     {
             "type": "object",
             "properties": {
-                "files": {"type": "array", "items": {"type": "string"}, "description": "要打包的文件/目录路径列表"},
+                "files_or_dir": {"type": "array", "items": {"type": "string"}, "description": "要打包的文件/目录路径列表"},
                 "output": {"type": "string", "description": "输出 ZIP 文件路径"},
             },
-            "required": ["files", "output"],
+            "required": ["files_or_dir", "output"],
         },
     _file_zip,
 )
@@ -940,11 +952,13 @@ DirListTool = make_tool(
                 "pattern": {
                     "type": "string",
                     "description": "文件名匹配，如 '*.py' 'test_*'，默认 '*'",
+                    "default": "*",
                 },
-                "max_depth": {"type": "integer", "description": "最大递归深度，默认 1"},
+                "max_depth": {"type": "integer", "description": "最大递归深度，默认 1", "default": 1},
                 "show_hidden": {
                     "type": "boolean",
                     "description": "是否显示隐藏文件，默认 false",
+                    "default": False,
                 },
             },
             "required": ["path"],
@@ -980,11 +994,13 @@ TextFilterTool = make_tool(
                 "action": {
                     "type": "string",
                     "description": "操作: grep / invert / head / tail / count",
+                    "default": "grep",
                 },
                 "text": {"type": "string", "description": "输入文本"},
                 "pattern": {
                     "type": "string",
                     "description": "grep/invert 时的匹配模式（通配或正则）",
+                    "default": "",
                 },
                 "n": {
                     "type": "integer",
@@ -994,13 +1010,15 @@ TextFilterTool = make_tool(
                 "case_sensitive": {
                     "type": "boolean",
                     "description": "是否区分大小写，默认 false",
+                    "default": False,
                 },
                 "regex": {
                     "type": "boolean",
                     "description": "是否将 pattern 视为正则表达式，默认 false",
+                    "default": False,
                 },
             },
-            "required": ["action", "text"],
+            "required": ["text"],
         },
     _text_filter,
 )
@@ -1017,6 +1035,11 @@ DiffStringsTool = make_tool(
                 "context_lines": {
                     "type": "integer",
                     "description": "上下文行数，默认 3",
+                },
+                "max_lines": {
+                    "type": "integer",
+                    "description": "返回的 diff 最大行数，默认 100",
+                    "default": 100,
                 },
             },
             "required": ["a", "b"],
@@ -1035,10 +1058,12 @@ CsvParseTool = make_tool(
                 "delimiter": {
                     "type": "string",
                     "description": "分隔符，'auto' 自动检测，或指定 ',' '\\t'",
+                    "default": "auto",
                 },
                 "has_header": {
                     "type": "boolean",
                     "description": "首行是否为表头，默认 true",
+                    "default": True,
                 },
             },
             "required": ["text"],
@@ -1054,10 +1079,11 @@ CsvGenTool = make_tool(
             "type": "object",
             "properties": {
                 "rows": {
-                    "type": "string",
-                    "description": 'JSON 数组字符串，如 \'[{"a":1},{"a":2}]\'',
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "dict 列表，如 [{\"name\":\"a\",\"age\":1}, ...]",
                 },
-                "delimiter": {"type": "string", "description": "分隔符，默认 ','"},
+                "delimiter": {"type": "string", "description": "分隔符，默认 ','", "default": ","},
             },
             "required": ["rows"],
         },
@@ -1081,6 +1107,7 @@ UuidGenTool = make_tool(
                 "length": {
                     "type": "integer",
                     "description": "hex/token 时的长度，默认 16",
+                    "default": 16,
                 },
             },
             "required": [],
@@ -1190,6 +1217,11 @@ FileReadTool = make_tool(
                     "type": "boolean",
                     "description": "是否返回文件/目录元信息",
                     "default": True,
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "目录递归读取（已弃用：目录读取已移除，请使用 dir_list / dir_tree）",
+                    "default": False,
                 },
             },
             "required": ["path"],
@@ -1523,6 +1555,11 @@ LogParseTool = make_tool(
                     "description": "auto / nginx / apache / syslog / jsonl",
                     "default": "auto",
                 },
+                "max_lines": {
+                    "type": "integer",
+                    "description": "最大解析行数，默认 200",
+                    "default": 200,
+                },
             },
             "required": ["text"],
         },
@@ -1554,6 +1591,7 @@ ProjectInitTool = make_tool(
                 "project_dir": {
                     "type": "string",
                     "description": "项目根目录路径，默认当前目录",
+                    "default": ".",
                 },
             },
             "required": [],
@@ -1572,6 +1610,7 @@ GitChangelogTool = make_tool(
                 "count": {
                     "type": "integer",
                     "description": "最近的 commit 数，默认 30",
+                    "default": 30,
                 },
             },
             "required": ["cwd"],
@@ -1769,6 +1808,11 @@ DepScanTool = make_tool(
                     "type": "string",
                     "description": "项目根目录，默认当前目录",
                 },
+                "timeout": {
+                    "type": "integer",
+                    "description": "超时秒数，默认 10",
+                    "default": 10,
+                },
             },
             "required": [],
         },
@@ -1787,6 +1831,11 @@ FileRemoveTool = make_tool(
                     "type": "boolean",
                     "description": "目录删除需显式确认",
                     "default": False,
+                },
+                "max_items": {
+                    "type": "integer",
+                    "description": "目录内容上限，超此数返回提案要求确认，默认 50",
+                    "default": 50,
                 },
             },
             "required": ["path"],
