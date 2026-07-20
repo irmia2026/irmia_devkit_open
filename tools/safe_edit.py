@@ -62,7 +62,12 @@ def _restore_line_endings(s: str, has_crlf: bool) -> str:
 
 
 def edit(
-    filepath: str, old: str, new: str, replace_all: bool = False, occurrence: int = 0
+    filepath: str,
+    old: str,
+    new: str,
+    replace_all: bool = False,
+    occurrence: int = 0,
+    preserve_inner_indent: bool = True,
 ) -> dict:
     """
     安全编辑文件：自动备份→替换→语法检查→通过保留/失败回滚。
@@ -75,6 +80,8 @@ def edit(
         new: 新文本
         replace_all: 是否替换所有匹配
         occurrence: 替换第 N 次出现（0=默认行为，首次出现。多匹配时可用此参数消歧）
+        preserve_inner_indent: 缩进对齐时保留嵌套函数的内部缩进（默认 True，自动开启）。
+            当 new 中包含嵌套 def/class 等多层缩进结构时自动保留。设为 False 可手动关闭。
 
     Returns:
         {"ok": true, "backup": "...", "syntax_ok": true}
@@ -141,7 +148,7 @@ def edit(
 
     if old_count == 0:
         # P0-1: whitespace-tolerant fallback before giving up
-        aligned = align_whitespace(content, old, new)
+        aligned = align_whitespace(content, old, new, preserve_inner_indent)
         if aligned:
             old, new = aligned
             old_count = content.count(old)
@@ -231,7 +238,7 @@ def edit(
         result["replaced"] = 1
         result["occurrence"] = occurrence
     else:
-        patch_result = patch(filepath, old, new, replace_all)
+        patch_result = patch(filepath, old, new, replace_all, preserve_inner_indent)
         if not patch_result.get("ok"):
             return {
                 **result,

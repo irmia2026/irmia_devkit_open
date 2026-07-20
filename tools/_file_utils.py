@@ -316,11 +316,18 @@ def find_closest_line(content: str, old: str, threshold: float = 0.5) -> dict | 
     return None
 
 
-def align_whitespace(content: str, old: str, new: str) -> tuple[str, str] | None:
+def align_whitespace(
+    content: str, old: str, new: str, preserve_inner_indent: bool = True
+) -> tuple[str, str] | None:
     """Whitespace-tolerant fallback matching (P0-1).
+
     当精确匹配失败时，尝试对齐 old/new 的行首/行尾空白与 content 中匹配的位置。
     返回 (aligned_old, aligned_new) 或 None。
     对标 Aider 的 replace_part_with_missing_leading_whitespace()。
+
+    preserve_inner_indent=True 时，new 溢出行不压扁为单一缩进级别，
+    而是计算 old→content 的缩进增量 delta，统一平移所有 new 行，
+    保留嵌套函数/类的内部缩进结构。
     """
     old_lines = old.split("\n")
     content_lines = content.split("\n")
@@ -344,11 +351,32 @@ def align_whitespace(content: str, old: str, new: str) -> tuple[str, str] | None
                 aligned_old = "\n".join(content_lines[i:i + len(old_lines)])
                 new_lines = new.split("\n")
                 aligned_new_lines = []
-                for j, nl in enumerate(new_lines):
-                    content_idx = i + j if j < len(old_lines) else i + len(old_lines) - 1
-                    content_indent = content_lines[content_idx][:len(content_lines[content_idx]) - len(content_lines[content_idx].lstrip())]
-                    new_stripped = nl.lstrip()
-                    aligned_new_lines.append(content_indent + new_stripped)
+
+                if preserve_inner_indent:
+                    # 缩进增量法：计算 old→content 的平移 delta，
+                    # 对所有 new 行统一应用，保留内部缩进结构。
+                    # 空行（无内容）保持原样，不强制加缩进。
+                    first_old_indent = len(content_lines[i]) - len(content_lines[i].lstrip())
+                    first_new_indent = len(new_lines[0]) - len(new_lines[0].lstrip())
+                    delta = first_old_indent - first_new_indent
+                    for nl in new_lines:
+                        stripped = nl.lstrip()
+                        if not stripped:
+                            aligned_new_lines.append(nl)
+                        else:
+                            original_indent = len(nl) - len(stripped)
+                            new_indent = max(0, original_indent + delta)
+                            aligned_new_lines.append(" " * new_indent + stripped)
+                else:
+                    # 原行为：溢出行复用最后一行的缩进（简单场景够用，嵌套结构会出问题）
+                    for j, nl in enumerate(new_lines):
+                        content_idx = i + j if j < len(old_lines) else i + len(old_lines) - 1
+                        content_indent = content_lines[content_idx][
+                            :len(content_lines[content_idx]) - len(content_lines[content_idx].lstrip())
+                        ]
+                        new_stripped = nl.lstrip()
+                        aligned_new_lines.append(content_indent + new_stripped)
+
                 aligned_new = "\n".join(aligned_new_lines)
                 return (aligned_old, aligned_new)
     return None

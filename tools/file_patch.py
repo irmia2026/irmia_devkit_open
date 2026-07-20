@@ -21,7 +21,13 @@ def _restore_line_endings(s: str, has_crlf: bool) -> str:
     return s.replace("\n", "\r\n") if has_crlf else s
 
 
-def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
+def patch(
+    filepath: str,
+    old: str,
+    new: str,
+    replace_all: bool = False,
+    preserve_inner_indent: bool = True,
+) -> dict:
     """
     精确替换文件中的文本。
 
@@ -30,6 +36,7 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
         old: 要被替换的旧文本（精确匹配）
         new: 替换后的新文本
         replace_all: 是否替换所有匹配项（默认只替换第一个）
+        preserve_inner_indent: 缩进对齐时保留嵌套结构的内部缩进（默认 True）
 
     Returns:
         {"ok": true, "replaced": 1, "file": "..."} 或 {"ok": false, "error": "..."}
@@ -58,7 +65,7 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
 
         if norm_old not in norm_content:
             # P0-1: whitespace-tolerant fallback before giving up
-            aligned = align_whitespace(norm_content, norm_old, norm_new)
+            aligned = align_whitespace(norm_content, norm_old, norm_new, preserve_inner_indent)
             if aligned:
                 aligned_old, aligned_new = aligned
                 count = norm_content.count(aligned_old)
@@ -114,7 +121,13 @@ def patch(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
         return {"ok": False, "error": f"无法写入文件: {e}"}
 
 
-def preview(filepath: str, old: str, new: str, replace_all: bool = False) -> dict:
+def preview(
+    filepath: str,
+    old: str,
+    new: str,
+    replace_all: bool = False,
+    preserve_inner_indent: bool = True,
+) -> dict:
     """预览替换效果，不实际修改文件。返回 diff。"""
     if not old:
         return {"ok": False, "error": "old 参数不能为空字符串"}
@@ -137,7 +150,7 @@ def preview(filepath: str, old: str, new: str, replace_all: bool = False) -> dic
     norm_new = _normalize_line_endings(new)
 
     if norm_old not in norm_content:
-        aligned = align_whitespace(norm_content, norm_old, norm_new)
+        aligned = align_whitespace(norm_content, norm_old, norm_new, preserve_inner_indent)
         if aligned:
             norm_old, norm_new = aligned
         else:
