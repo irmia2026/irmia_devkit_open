@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.6.2 — http_get HTML→Markdown 正文提取
+
+- **http_get 增强**: 新增 `format` 参数（html|markdown|text），`extract` 参数（trafilatura 正文提取去广告）；三级降级（trafilatura→markdownify→BS4 纯文本），零依赖也能工作。
+- **http_get 修复**: `format=html` 模式下 truncated 标记逻辑修正，修复 body 5KB-5MB 区间截断漏报。
+- **可选依赖**: `webfetch` 扩展推荐 trafilatura/markdownify/beautifulsoup4/lxml，`pip install irmia-devkit[webfetch]` 一键安装。
+- **测试**: 15 passed (http_get)，覆盖率 format=html/markdown/text + extract=true/false + 格式校验。
+
 ## v2.6.1 — FTS 数据完整性 / TOCTOU / 编码 / 回滚安全修复
 
 - **codegraph 修复**: 增量索引时 FTS 插入失败不再静默吞异常，改为标记后于收尾处全量重建 FTS，防止全文搜索永久漏结果。

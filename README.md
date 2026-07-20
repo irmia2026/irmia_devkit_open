@@ -129,7 +129,7 @@ Python ≥ 3.10
 
 | 工具 | 用途 |
 |------|------|
-| `http_get` | HTTP GET (SSRF 防护) |
+| `http_get` | HTTP GET + HTML→Markdown 正文提取 (SSRF 防护) |
 | `http_post` | HTTP POST |
 | `http_download` | 二进制下载 (500MB 上限 + 路径沙箱) |
 
@@ -213,7 +213,7 @@ python -m pytest tests/ -v
 
 ## 版本
 
-2.6.1 · [Changelog](CHANGELOG.md)
+2.6.2 · [Changelog](CHANGELOG.md)
 
 ## 作者
 

@@ -122,7 +122,7 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 
 | Tool | Description |
 |------|-------------|
-| `http_get` | HTTP GET (SSRF protection) |
+| `http_get` | HTTP GET + HTML→Markdown content extraction (SSRF protection) |
 | `http_post` | HTTP POST |
 | `http_download` | Binary download (500MB cap + path sandbox) |
 
@@ -195,7 +195,7 @@ python -m pytest tests/ -v
 
 ## Version
 
-2.6.1 · [Changelog](CHANGELOG.md)
+2.6.2 · [Changelog](CHANGELOG.md)
 
 ## Author
 
