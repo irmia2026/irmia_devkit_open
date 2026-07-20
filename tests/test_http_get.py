@@ -17,7 +17,7 @@ SAMPLE_HTML = (
 )
 
 # 构造超过 8000 字符的长 HTML，用于测试分页
-_LONG_BODY = "<p>" + ("long text. " * 3000) + "</p>"
+_LONG_BODY = "<p>" + ("long text. " * 5000) + "</p>"
 SAMPLE_HTML_LONG = (
     "<html><head><title>Long Page</title>"
     '<meta name="description" content="A very long page for pagination tests.">'

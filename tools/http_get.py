@@ -103,13 +103,46 @@ def _extract_metadata(html: str) -> dict:
 
 def _convert_html(html: str, format: str, extract: bool) -> str:
     """将 HTML 转换为 markdown 或 text。
-    
-    如果 extract=True：用 trafilatura 先提取正文再转换。
-    如果 extract=False：用 markdownify 全页转换。
-    安装失败时自动降级。
+
+    降级链：trafilatura → markdownify → BeautifulSoup → html截断。
+    extract=True 先走 trafilatura 正文提取，False 直接从 markdownify 开始。
     """
+
+    def _markdown_convert(h):
+        """markdownify 转换 + format=text 时去标记，失败返回 None。"""
+        try:
+            from markdownify import markdownify as md
+            text = md(h, heading_style="ATX", strip=["script", "style"])
+            if format == "text":
+                import re
+                text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+                text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+                text = re.sub(r"\*(.+?)\*", r"\1", text)
+                text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
+                text = re.sub(r"```[\s\S]*?```", "", text)
+                text = re.sub(r"`(.+?)`", r"\1", text)
+            return text.strip()
+        except Exception:
+            return None
+
+    def _bs4_plain(h):
+        """BeautifulSoup 纯文本兜底，BS4 不可用时返回截断原文。"""
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(h, "lxml")
+        except Exception:
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(h, "html.parser")
+            except Exception:
+                return h[:_MAX_CONTENT_LENGTH * 3]
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        return "\n".join(lines)
+
     if extract:
-        # 尝试 trafilatura 正文提取
         try:
             import trafilatura
             extracted = trafilatura.extract(
@@ -122,71 +155,9 @@ def _convert_html(html: str, format: str, extract: bool) -> str:
                 return extracted.strip()
         except Exception:
             pass
+        return _markdown_convert(html) or _bs4_plain(html)
 
-        # trafilatura 不可用或提取失败 → 降级到 markdownify
-        try:
-            from markdownify import markdownify as md
-            text = md(html, heading_style="ATX", strip=["script", "style"])
-            if format == "text":
-                # 简单去 Markdown 标记
-                import re
-                text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-                text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-                text = re.sub(r"\*(.+?)\*", r"\1", text)
-                text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
-                text = re.sub(r"```[\s\S]*?```", "", text)
-                text = re.sub(r"`(.+?)`", r"\1", text)
-            return text.strip()
-        except Exception:
-            pass
-
-        # 最终降级：纯文本提取
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html, "lxml")
-        except Exception:
-            try:
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(html, "html.parser")
-            except Exception:
-                return html[:_MAX_CONTENT_LENGTH * 3]
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        return "\n".join(lines)
-    else:
-        # extract=False：全页 markdownify 转换
-        try:
-            from markdownify import markdownify as md
-            text = md(html, heading_style="ATX", strip=["script", "style"])
-            if format == "text":
-                import re
-                text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-                text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-                text = re.sub(r"\*(.+?)\*", r"\1", text)
-                text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
-                text = re.sub(r"```[\s\S]*?```", "", text)
-                text = re.sub(r"`(.+?)`", r"\1", text)
-            return text.strip()
-        except Exception:
-            pass
-
-        # 降级：纯文本提取
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html, "lxml")
-        except Exception:
-            try:
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(html, "html.parser")
-            except Exception:
-                return html[:_MAX_CONTENT_LENGTH * 3]
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        return "\n".join(lines)
+    return _markdown_convert(html) or _bs4_plain(html)
 
 
 def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) -> dict:
