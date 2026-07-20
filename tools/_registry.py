@@ -545,12 +545,28 @@ RgSearchTool = make_tool(
 
 HttpGetTool = make_tool(
     "http_get",
-    "【HTTP GET 唯一选择】轻量 HTTP 请求。不要用 astrbot_execute_shell 跑 curl——它无 SSRF（内网 IP）防护。10s 超时，返回 status + body + size，body 超 5000 字符自动截断。",
+    "【HTTP GET 唯一选择】HTTP GET 请求 + 智能内容转换。不要用 astrbot_execute_shell 跑 curl——它无 SSRF（内网 IP）防护。默认返回原始 HTML（5000 字符截断）。支持 format='markdown' 转为 LLM 友好 Markdown，format='text' 提取纯文本正文；extract=true 先提取正文再转换（trafilatura 去广告/导航/页脚），默认 false 全页转换。15s 超时。",
     {
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "请求 URL"},
                 "headers": {"type": "object", "description": "自定义请求头，可选"},
+                "format": {
+                    "type": "string",
+                    "description": "输出格式：html(默认，返回原始HTML) | markdown(LLM友好的Markdown) | text(纯文本正文)",
+                    "enum": ["html", "markdown", "text"],
+                    "default": "html",
+                },
+                "extract": {
+                    "type": "boolean",
+                    "description": "是否先提取正文再转换（trafilatura 去广告/导航/页脚），默认 false 全页转换",
+                    "default": False,
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "超时秒数，默认 15",
+                    "default": 15,
+                },
             },
             "required": ["url"],
         },

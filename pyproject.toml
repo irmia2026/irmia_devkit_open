@@ -4,6 +4,9 @@ version = "2.6.1"
 description = "弥亚开发工具箱 — 为 LLM Agent 提供安全的代码开发工具集"
 requires-python = ">=3.10"
 
+[project.optional-dependencies]
+webfetch = ["trafilatura>=1.0", "markdownify>=1.0", "beautifulsoup4>=4.0", "lxml>=4.0"]
+
 [tool.pytest.ini_options]
 strict = true
 testpaths = ["tests"]
