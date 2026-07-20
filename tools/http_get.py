@@ -6,6 +6,7 @@ http_get — 纯标准库 HTTP 客户端。
 from __future__ import annotations
 
 from collections import OrderedDict
+import threading
 
 import urllib.request
 import urllib.error
@@ -23,6 +24,7 @@ _DEFAULT_TIMEOUT = 15  # 默认超时秒数
 
 # ── 翻页缓存：key=(url, format, extract) → 完整转换结果 ──
 _page_cache: OrderedDict = OrderedDict()
+_page_cache_lock = threading.Lock()
 
 
 def _cache_key(url: str, format: str, extract: bool) -> tuple:
@@ -31,20 +33,22 @@ def _cache_key(url: str, format: str, extract: bool) -> tuple:
 
 def _get_cached(key: tuple) -> dict | None:
     """命中缓存时返回并移到末尾（LRU）；未命中返回 None。"""
-    if key in _page_cache:
-        _page_cache.move_to_end(key)
-        return _page_cache[key]
+    with _page_cache_lock:
+        if key in _page_cache:
+            _page_cache.move_to_end(key)
+            return _page_cache[key]
     return None
 
 
 def _set_cache(key: tuple, entry: dict) -> None:
     """写入缓存，超过上限踢最旧的。"""
-    if key in _page_cache:
-        _page_cache.move_to_end(key)
-    else:
-        while len(_page_cache) >= _PAGE_CACHE_SIZE:
-            _page_cache.popitem(last=False)
-    _page_cache[key] = entry
+    with _page_cache_lock:
+        if key in _page_cache:
+            _page_cache.move_to_end(key)
+        else:
+            while len(_page_cache) >= _PAGE_CACHE_SIZE:
+                _page_cache.popitem(last=False)
+        _page_cache[key] = entry
 
 
 def _read_limited(resp, max_bytes: int = _MAX_RESPONSE_SIZE) -> str:
@@ -60,7 +64,7 @@ def _read_limited(resp, max_bytes: int = _MAX_RESPONSE_SIZE) -> str:
         if total >= max_bytes:
             break
     body = b"".join(chunks).decode("utf-8", errors="replace")
-    return body, total > max_bytes
+    return body, total >= max_bytes
 
 
 def _build_response(resp) -> dict:
@@ -80,23 +84,20 @@ def _extract_metadata(html: str) -> dict:
     description = ""
     try:
         from bs4 import BeautifulSoup
+    except ImportError:
+        return {"title": title, "description": description}
+    try:
         soup = BeautifulSoup(html, "lxml")
-        if soup.title and soup.title.string:
-            title = soup.title.string.strip()[:200]
-        meta_desc = soup.find("meta", attrs={"name": "description"})
-        if meta_desc and meta_desc.get("content"):
-            description = meta_desc["content"].strip()[:500]
     except Exception:
         try:
-            from bs4 import BeautifulSoup
             soup = BeautifulSoup(html, "html.parser")
-            if soup.title and soup.title.string:
-                title = soup.title.string.strip()[:200]
-            meta_desc = soup.find("meta", attrs={"name": "description"})
-            if meta_desc and meta_desc.get("content"):
-                description = meta_desc["content"].strip()[:500]
         except Exception:
-            pass
+            return {"title": title, "description": description}
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()[:200]
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    if meta_desc and meta_desc.get("content"):
+        description = meta_desc["content"].strip()[:500]
     return {"title": title, "description": description}
 
 
@@ -270,6 +271,9 @@ def get(
     valid_formats = ("html", "markdown", "text")
     if format not in valid_formats:
         return {"ok": False, "error": f"format 无效: {format}，可选 {valid_formats}"}
+
+    if offset < 0:
+        return {"ok": False, "error": f"offset 不能为负数: {offset}"}
 
     try:
         req = urllib.request.Request(url, headers=headers or {})

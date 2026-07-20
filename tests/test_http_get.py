@@ -115,12 +115,12 @@ class TestHttpGet:
 
     def test_format_markdown(self, monkeypatch):
         """format=markdown 应返回 Markdown 内容和元数据。"""
-        from tools import _http_utils as hu
+        from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
             return FakeResponse(SAMPLE_HTML.encode("utf-8"))
 
-        monkeypatch.setattr(hu, "make_opener", lambda: _fake_opener(fake_open))
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com", format="markdown")
         assert r["ok"] is True
         assert r["format"] == "markdown"
@@ -132,12 +132,12 @@ class TestHttpGet:
 
     def test_format_markdown_extract(self, monkeypatch):
         """format=markdown + extract=true 应标记 extracted。"""
-        from tools import _http_utils as hu
+        from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
             return FakeResponse(SAMPLE_HTML.encode("utf-8"))
 
-        monkeypatch.setattr(hu, "make_opener", lambda: _fake_opener(fake_open))
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com", format="markdown", extract=True)
         assert r["ok"] is True
         assert r["format"] == "markdown"
@@ -146,12 +146,12 @@ class TestHttpGet:
 
     def test_format_text(self, monkeypatch):
         """format=text + extract=true 应返回纯文本。"""
-        from tools import _http_utils as hu
+        from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
             return FakeResponse(SAMPLE_HTML.encode("utf-8"))
 
-        monkeypatch.setattr(hu, "make_opener", lambda: _fake_opener(fake_open))
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com", format="text", extract=True)
         assert r["ok"] is True
         assert r["format"] == "text"
