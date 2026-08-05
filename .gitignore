@@ -34,3 +34,4 @@ data/
 docs/
 _debug_*
 _d*.py
+.deveco/
