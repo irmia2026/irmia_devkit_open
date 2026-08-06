@@ -51,6 +51,8 @@ def unwrap(result: dict) -> str:
     """检测嵌套 ok:false 并展开；成功则正常包装。
     若结果已含 proposal/options/evidence/stdout/stderr 等协议或诊断字段，则直接透传——
     无论 ok 值，避免丢失 LLM 需要的诊断信息。
+    ok:false 且除 ok/error 外还有其他字段（如 status/body）时同样原样透传，
+    仅当结果只有 ok/error 两个字段时才压扁为 err_json。
     纯 ok:true 的无协议结果正常包入 data 字段。
     """
     if not isinstance(result, dict):
@@ -58,6 +60,8 @@ def unwrap(result: dict) -> str:
     if any(k in result for k in ("proposal", "options", "evidence", "next_call", "stdout", "stderr", "cmd")):
         return json.dumps(result, ensure_ascii=False)
     if result.get("ok") is False:
+        if any(k not in ("ok", "error") for k in result):
+            return json.dumps(result, ensure_ascii=False)
         return err_json(result.get("error", "未知错误"))
     return json.dumps({"ok": True, "data": result}, ensure_ascii=False)
 

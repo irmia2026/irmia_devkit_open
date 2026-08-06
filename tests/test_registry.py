@@ -54,7 +54,7 @@ class TestRegistryConsistency:
             )
 
     def test_total_tool_count(self):
-        """_ALL_TOOLS 总数应为 65（v2.6.3 http_get 分页翻页 + schema 一致性对齐）"""
+        """_ALL_TOOLS 总数应为 65（v2.6.4 全量 review 修复，工具数不变）"""
         assert len(_ALL_TOOLS) == 65
 
     def test_no_duplicate_tool_names(self):

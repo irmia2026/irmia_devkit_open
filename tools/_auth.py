@@ -10,6 +10,7 @@ import logging
 import time
 
 from . import op_log as _op_log
+from ._helpers import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ def protect_tool(tool, allowed_ids, access_checker=None):
                 start = time.monotonic()
                 try:
                     result = await original_call(context, **kwargs)
-                    _op_log.record(
+                    # op_log 写 SQLite 是同步阻塞调用，丢到线程池避免卡住事件循环
+                    await run_sync(
+                        _op_log.record,
                         tool_name,
                         kwargs,
                         result,
@@ -44,7 +47,8 @@ def protect_tool(tool, allowed_ids, access_checker=None):
                     )
                     return result
                 except Exception as exc:
-                    _op_log.record_exception(
+                    await run_sync(
+                        _op_log.record_exception,
                         tool_name,
                         kwargs,
                         exc,

@@ -107,3 +107,44 @@ class TestLinterFallback:
         if not result["ok"] and "未安装" in result.get("error", ""):
             # 两个都没装
             assert "均未安装" in result["error"]
+
+
+class TestProbeCache:
+    """_find_ruff / _detect 的探测结果模块级缓存（TTL 300 秒）。"""
+
+    def test_find_ruff_result_cached(self, monkeypatch):
+        import tools.lint_runner as lr
+
+        lr._find_ruff_cache = None
+        lr._which_cache.clear()
+        first = lr._find_ruff()
+        # TTL 内篡改 which/subprocess，第二次应仍返回缓存结果而不重新探测
+        monkeypatch.setattr(lr.shutil, "which", lambda cmd: None)
+
+        def boom(*a, **k):
+            raise RuntimeError("should not be called")
+
+        monkeypatch.setattr(lr.subprocess, "run", boom)
+        assert lr._find_ruff() == first
+        lr._find_ruff_cache = None
+        lr._which_cache.clear()
+
+    def test_detect_which_probe_cached(self, monkeypatch):
+        import shutil as _shutil
+
+        import tools.lint_runner as lr
+
+        lr._which_cache.clear()
+        calls = []
+        real_which = _shutil.which
+
+        def counting_which(cmd):
+            calls.append(cmd)
+            return real_which(cmd)
+
+        monkeypatch.setattr(lr.shutil, "which", counting_which)
+        p = Path("some_file.py")
+        lr._detect(p)
+        lr._detect(p)
+        assert calls.count("ruff") == 1
+        lr._which_cache.clear()

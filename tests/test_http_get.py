@@ -99,8 +99,8 @@ class TestHttpGet:
         assert r["ok"] is False
         assert "format" in r["error"]
 
-    def test_format_html_default(self, monkeypatch):
-        """默认 format=html 保持向后兼容。"""
+    def test_format_default_is_markdown(self, monkeypatch):
+        """默认 format=markdown，返回转换后内容和 converter 字段。"""
         from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
@@ -110,8 +110,37 @@ class TestHttpGet:
         r = get("http://example.com")
         assert r["ok"] is True
         assert r["status"] == 200
+        assert r["format"] == "markdown"
+        assert "content" in r
+        assert r["converter"] in ("trafilatura", "markdownify", "bs4")
+
+    def test_format_html_passthrough(self, monkeypatch):
+        """format=html 返回原始 body，converter 为 none。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="html")
+        assert r["ok"] is True
         assert "body" in r
         assert "truncated" in r
+        assert r["converter"] == "none"
+
+    def test_format_html_truncated_hint(self, monkeypatch):
+        """html 模式截断时附 hint 引导改用可分页格式。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="html")
+        assert r["ok"] is True
+        assert r["truncated"] is True
+        assert "hint" in r
+        assert "markdown" in r["hint"]
 
     def test_format_markdown(self, monkeypatch):
         """format=markdown 应返回 Markdown 内容和元数据。"""
@@ -223,10 +252,40 @@ class TestHttpGet:
             return FakeResponse(SAMPLE_HTML.encode("utf-8"))
 
         monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
-        r = get("http://example.com", offset=100)
+        r = get("http://example.com", format="html", offset=100)
         assert r["ok"] is True
         assert "body" in r
         assert "has_more" not in r
+
+    def test_page_cache_ttl_expires(self, monkeypatch):
+        """缓存命中但超过 TTL 时应视为未命中，重新请求。"""
+        import time as _time
+        from tools import http_get as hg
+
+        _clear_cache()
+        key = hg._cache_key("http://example.com", "markdown", False)
+        hg._set_cache(key, {
+            "status": 200, "size": 10, "title": "", "description": "",
+            "content": "stale content", "converter": "markdownify",
+        })
+        # 人为把缓存时间拨到 TTL 之前
+        hg._page_cache[key]["_cached_at"] = _time.monotonic() - hg._PAGE_CACHE_TTL - 1
+        assert hg._get_cached(key) is None
+        assert key not in hg._page_cache  # 过期条目被清除
+
+    def test_page_cache_ttl_fresh_hit(self):
+        """未过期的缓存正常命中。"""
+        from tools import http_get as hg
+
+        _clear_cache()
+        key = hg._cache_key("http://example.com", "markdown", False)
+        hg._set_cache(key, {
+            "status": 200, "size": 10, "title": "", "description": "",
+            "content": "fresh content", "converter": "markdownify",
+        })
+        hit = hg._get_cached(key)
+        assert hit is not None
+        assert hit["content"] == "fresh content"
 
 
 class TestHttpPost:

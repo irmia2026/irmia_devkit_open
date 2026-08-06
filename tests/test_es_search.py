@@ -2,6 +2,7 @@
 
 Tests the Python fallback search path (no es.exe dependency)."""
 
+import os
 from pathlib import Path
 
 from tools.es_search import search
@@ -52,3 +53,21 @@ class TestEsSearch:
         assert r["ok"] is True
         # Should find the 'tools' directory
         assert isinstance(r["count"], int)
+
+    def test_posix_fallback_note_on_regex(self):
+        """POSIX fallback 下传 regex=True 应在 note 中说明不支持。"""
+        r = search(query="test", path=".", regex=True, max_results=5)
+        assert r["ok"] is True
+        assert "POSIX fallback 不支持 regex/whole_word/sort_by" in r.get("note", "")
+
+    def test_posix_fallback_note_on_sort_by(self):
+        r = search(query="test", path=".", sort_by="size", max_results=5)
+        assert r["ok"] is True
+        assert "POSIX fallback 不支持 regex/whole_word/sort_by" in r.get("note", "")
+
+    def test_posix_fallback_windows_default_home(self):
+        """Windows 且未传 path 时默认搜索用户主目录并在 note 中说明。"""
+        r = search(query="test", max_results=5)
+        assert r["ok"] is True
+        if os.name == "nt":
+            assert "用户主目录" in r.get("note", "")

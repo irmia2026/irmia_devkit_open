@@ -4,6 +4,7 @@ dir_list — 目录列表。
 """
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -55,11 +56,15 @@ def list_dir(
                         "path": str(full),
                         "type": "dir" if entry.is_dir() else "file",
                     }
-                    if entry.is_file():
-                        try:
-                            st = entry.stat()
+                    try:
+                        st = entry.stat()
+                        info["mtime"] = datetime.fromtimestamp(
+                            st.st_mtime, tz=timezone.utc
+                        ).isoformat()
+                        if entry.is_file():
                             info["size"] = st.st_size
-                        except OSError:
+                    except OSError:
+                        if entry.is_file():
                             info["size"] = 0
                     entries.append(info)
 

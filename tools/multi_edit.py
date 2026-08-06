@@ -10,12 +10,21 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem, check_path_allowed
+from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem, check_path_allowed, prune_backups
 from .safe_edit import _backup_dir
 from .syntax_check import check as syntax_check_file
 
 
 _CODE_SUFFIXES = (".py", ".nim", ".go", ".js", ".ts", ".jsx", ".tsx")
+
+
+class AmbiguousMatchError(ValueError):
+    """old 文本多匹配且未指定 occurrence/replace_all 时抛出，携带匹配位置证据。"""
+
+    def __init__(self, message: str, matches: list | None = None, total: int = 0):
+        super().__init__(message)
+        self.matches = matches or []
+        self.total = total
 
 
 def _normalize_line_endings(s: str) -> str:
@@ -85,7 +94,11 @@ def _apply_one(content: str, edit_item: dict, item_index: int) -> tuple[str, dic
             if line_end == -1:
                 line_end = len(content)
             previews.append({"line": line, "col": col, "preview": content[line_start:line_end].strip()[:100]})
-        raise ValueError(f"edit #{item_index}: old text appears {len(positions)} times; specify occurrence or replace_all")
+        raise AmbiguousMatchError(
+            f"edit #{item_index}: old text appears {len(positions)} times; specify occurrence or replace_all",
+            matches=previews,
+            total=len(positions),
+        )
     idx = positions[0]
     return content[:idx] + new + content[idx + len(old):], {"replaced": 1}
 
@@ -179,6 +192,22 @@ def run(edits: list, syntax_check: bool = True) -> dict:
             files[path]["content"] = new_content
             files[path]["edits"].append({"index": i, **meta})
             plan.append({"file": str(path), "edit": i, **meta})
+    except AmbiguousMatchError as exc:
+        # B6: 消歧证据（匹配位置）随错误返回，与 safe_edit 的响应形态对齐
+        count = exc.total or len(exc.matches)
+        return {
+            "ok": False,
+            "error": str(exc),
+            "proposal": f"请使用 occurrence=N 指定目标（1~{count}），或设 replace_all=True 替换全部",
+            "options": [f"occurrence={i+1}" for i in range(min(count, 5))] + ["replace_all=True"],
+            "evidence": {"occurrence_count": count, "matches": exc.matches[:20]},
+            "matches": exc.matches[:20],
+            "occurrence_count": count,
+            "applied": [],
+            "total_requested": len(edits),
+            "total_applied": 0,
+            "rolled_back_all": True,
+        }
     except Exception as exc:
         return {
             "ok": False,
@@ -254,6 +283,9 @@ def run(edits: list, syntax_check: bool = True) -> dict:
 
     # calculate total replacements (replace_all may replace >1 instance per edit)
     replacements_made = sum(e.get("replaced", 1) for e in plan)
+
+    # P1: 惰性清理备份目录（防御性，异常静默吞掉，绝不影响编辑主流程）
+    prune_backups(str(_backup_dir()))
 
     return {
         "ok": True,

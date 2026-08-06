@@ -65,3 +65,17 @@ class TestShellExec:
         assert result["ok"] is False
         assert result["stdout"] == "partial stdout"
         assert result["stderr"] == "partial stderr"
+
+    def test_timeout_clamped_to_600(self, monkeypatch):
+        """timeout 上限 600 秒，防止误传超大值导致进程悬挂。"""
+        captured = {}
+
+        def fake_run(*args, **kwargs):
+            captured["timeout"] = kwargs["timeout"]
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+        monkeypatch.setattr("tools.shell_exec.subprocess.run", fake_run)
+
+        run("python -m pytest tests", timeout=99999)
+
+        assert captured["timeout"] == 600

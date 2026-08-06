@@ -46,6 +46,42 @@ class TestRgSearchHelpers:
         assert rg_search._has_nested_quantifiers("(a?)+") is True
         assert rg_search._has_nested_quantifiers("a+") is False
 
+    def test_parse_rg_output_truncates_long_lines(self):
+        """B7: rg 解析路径与 Python fallback 一致截断到 200 字符。"""
+        long_line = "x" * 500
+        stdout = f"a.py:1:{long_line}"
+        matches = rg_search._parse_rg_output(stdout)
+        assert len(matches) == 1
+        assert len(matches[0]["content"]) == 200
+
+    def test_parse_rg_with_context_truncates_long_lines(self):
+        long_line = "y" * 500
+        stdout = f"a.py-1-{long_line}\na.py:2:{long_line}\na.py-3-{long_line}"
+        matches = rg_search._parse_rg_with_context(stdout)
+        assert len(matches) == 1
+        assert len(matches[0]["content"]) == 200
+        for ctx in matches[0]["context"]:
+            assert len(ctx["content"]) == 200
+
+
+class TestContextLinesClamp:
+    def test_context_lines_clamped_to_10(self, tmp_project, monkeypatch):
+        """context_lines 超出 [0, 10] 时被 clamp，不报错。"""
+        monkeypatch.setattr(rg_search, "_find_rg", lambda: None)
+        r = rg_search.search("hello", path=tmp_project, context_lines=999)
+        assert r["ok"] is True
+        for m in r["matches"]:
+            # clamp 到 10：上下文行号距离匹配行不超过 10
+            for ctx in m.get("context", []):
+                assert abs(ctx["line"] - m["line"]) <= 10
+
+    def test_context_lines_negative_clamped_to_0(self, tmp_project, monkeypatch):
+        monkeypatch.setattr(rg_search, "_find_rg", lambda: None)
+        r = rg_search.search("hello", path=tmp_project, context_lines=-5)
+        assert r["ok"] is True
+        for m in r["matches"]:
+            assert "context" not in m
+
 
 class TestRgSearchPythonFallback:
     def _force_python(self):

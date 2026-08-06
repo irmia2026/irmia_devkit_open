@@ -1,6 +1,6 @@
 # Irmia DevKit (弥亚开发工具箱)
 
-An AstrBot plugin providing 64 secure, structured code development tools for LLM Agents.
+An AstrBot plugin providing 65 secure, structured code development tools for LLM Agents.
 
 **Requires**: Python ≥ 3.10, AstrBot any version.
 
@@ -50,19 +50,19 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 
 `syntax_check`/`lint_runner`/`rg_search` include surrounding code context in their results, enabling the LLM to locate issues without an extra file read.
 
-64 tools organized into 10 groups. Disable entire groups or individual tools via `config.json`.
+65 tools organized into 10 groups. Disable entire groups or individual tools via `config.json`.
 
-## Tool List (64)
+## Tool List (65)
 
 ### 🔒 Safe Edit Chain (10)
 
 | Tool | Description |
 |------|-------------|
-| `safe_edit` | Backup → replace → syntax check → keep/rollback. **Only way to edit code** |
+| `safe_edit` | Backup → replace → syntax check → keep/rollback; line-insert/delete modes. **Only way to edit code** |
 | `safe_write` | Create new files / overwrite whole files with syntax check |
 | `safe_rollback` | Rollback file to a backup |
-| `safe_backups` | List all backup files |
-| `file_patch` | Exact text replacement for non-code files |
+| `safe_backups` | List backup files (auto retention: 10 per file + 500MB LRU) |
+| `file_patch` | Exact text replacement for non-code files, occurrence disambiguation |
 | `file_preview` | Preview replacement effect (dry-run diff) |
 | `syntax_check` | Syntax check for Python / Nim / Go / JS / TS |
 | `lint_runner` | Code quality check (ruff / pylint / eslint with auto-fallback) |
@@ -76,20 +76,20 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 | `git_status` | Repository status (--porcelain) |
 | `git_diff` | Workspace/staged diff |
 | `git_log` | Recent N commits |
-| `git_commit` | Stage all + commit (>10 files blocked) |
+| `git_commit` | Stage + commit (>10 files blocked; files for selective staging / force) |
 | `git_branch` | Current branch |
 | `git_remote` | Remote URL |
 | `git_push` | Push to origin (no --force) |
 | `gh_pr` | Pull Request: create/list/merge/view |
 | `gh_issue` | Issue: create/list/close |
 | `gh_release` | Release: create/list |
-| `gh_repo` | Repo: create/view/CI/auth check |
+| `gh_repo` | Repo: create/view/CI status/CI logs/auth check |
 
 ### 📁 File System (12)
 
 | Tool | Description |
 |------|-------------|
-| `safe_read` | Enhanced safe file read: auto-encoding, binary/hex, head/tail, line ranges, directory, skeleton |
+| `safe_read` | Enhanced safe file read: auto-encoding, line-number prefixes, binary/hex, head/tail, line ranges, skeleton |
 | `es_search` | Everything/locate/fd filename search |
 | `rg_search` | File content search (ripgrep + Python fallback) |
 | `dir_tree` | Directory tree visualization |
@@ -122,7 +122,7 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 
 | Tool | Description |
 |------|-------------|
-| `http_get` | HTTP GET + HTML→Markdown content extraction (SSRF protection) |
+| `http_get` | HTTP GET + HTML→Markdown extraction (SSRF protection, markdown pagination by default) |
 | `http_post` | HTTP POST |
 | `http_download` | Binary download (500MB cap + path sandbox) |
 
@@ -191,11 +191,11 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-209 test cases; current local verification is 209 passed and 8 skipped. Coverage includes SSRF, safe_edit, Zip-slip, SQL injection, ReDoS, registry consistency, linter/test fallback, auth permission checks, semantic indexing, atomic edits, safe command execution, and audit logging.
+Current local verification: 661 passed and 8 skipped. Coverage includes SSRF, safe_edit, Zip-slip, SQL injection, ReDoS, registry consistency, linter/test fallback, auth permission checks, semantic indexing, atomic edits, safe command execution, and audit logging.
 
 ## Version
 
-2.6.3 · [Changelog](CHANGELOG.md)
+2.6.4 · [Changelog](CHANGELOG.md)
 
 ## Author
 

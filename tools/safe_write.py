@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem
+from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem, prune_backups
 from .safe_edit import _backup_dir
 from .file_remove import _FORBIDDEN_PREFIXES
 
@@ -222,7 +222,10 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
                     "rolled_back": False,
                     "error": f"语法检查失败且回滚失败: {e}",
                     "proposal": f"文件已被覆盖，备份在 {backup_path}，请手动恢复",
-                    "options": ["restore_backup"],
+                    "options": [
+                        {"tool": "safe_rollback", "params": {"filepath": str(p), "backup_name": backup_path.name}},
+                        {"tool": "file_diff", "params": {"file_a": str(backup_path), "file_b": str(p)}},
+                    ],
                 }
             return {
                 **result,
@@ -234,9 +237,15 @@ def write(filepath: str, content: str, overwrite: bool = False) -> dict:
                     "覆盖内容存在语法错误，已恢复原文件。"
                     "检查 content 是否完整后重试，或先用 safe_edit 做增量修改。"
                 ),
-                "options": ["修正后重新 safe_write(overwrite=true)", "改用 safe_edit 做局部修改", "show_backup_diff"],
+                "options": [
+                    "修正后重新 safe_write(overwrite=true)",
+                    "改用 safe_edit 做局部修改",
+                    {"tool": "file_diff", "params": {"file_a": str(backup_path), "file_b": str(p)}},
+                ],
             }
 
+        # P1: 惰性清理备份目录（防御性，异常静默吞掉）
+        prune_backups(str(backup_root))
         result["ok"] = True
         return result
 

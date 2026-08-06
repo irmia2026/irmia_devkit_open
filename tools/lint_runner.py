@@ -8,7 +8,23 @@ import sys
 import json
 import re as _re
 import shutil
+import time
 from pathlib import Path
+
+_PROBE_CACHE_TTL = 300  # which/_find_ruff 探测结果缓存秒数
+_which_cache: dict[str, tuple[float, str | None]] = {}
+_find_ruff_cache: tuple[float, list] | None = None
+
+
+def _which_cached(cmd: str) -> str | None:
+    """shutil.which 的模块级缓存封装，TTL 300 秒。"""
+    now = time.monotonic()
+    hit = _which_cache.get(cmd)
+    if hit is not None and now - hit[0] < _PROBE_CACHE_TTL:
+        return hit[1]
+    result = shutil.which(cmd)
+    _which_cache[cmd] = (now, result)
+    return result
 
 
 def run(filepath: str, linter: str = "auto") -> dict:
@@ -53,9 +69,9 @@ def _detect(p: Path) -> str:
     suffix = p.suffix.lower()
     if suffix in (".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"):
         return "eslint"
-    if shutil.which("ruff"):
+    if _which_cached("ruff"):
         return "ruff"
-    if shutil.which("pylint"):
+    if _which_cached("pylint"):
         return "pylint"
     return "ruff"
 
@@ -98,14 +114,22 @@ def _add_context(p: Path, issues: list, max_issues: int = 5) -> None:
 
 
 def _find_ruff() -> list:
-    """查找 ruff 可执行路径：优先命令行，备 python -m ruff"""
-    if shutil.which("ruff"):
-        return ["ruff"]
-    try:
-        subprocess.run([sys.executable, "-m", "ruff", "--version"], capture_output=True, timeout=5, check=True)
-        return [sys.executable, "-m", "ruff"]
-    except Exception:
-        return []
+    """查找 ruff 可执行路径：优先命令行，备 python -m ruff。结果缓存 300 秒。"""
+    global _find_ruff_cache
+    now = time.monotonic()
+    if _find_ruff_cache is not None and now - _find_ruff_cache[0] < _PROBE_CACHE_TTL:
+        return _find_ruff_cache[1]
+    result: list = []
+    if _which_cached("ruff"):
+        result = ["ruff"]
+    else:
+        try:
+            subprocess.run([sys.executable, "-m", "ruff", "--version"], capture_output=True, timeout=5, check=True)
+            result = [sys.executable, "-m", "ruff"]
+        except Exception:
+            result = []
+    _find_ruff_cache = (now, result)
+    return result
 
 
 def _run_ruff(p: Path) -> dict:

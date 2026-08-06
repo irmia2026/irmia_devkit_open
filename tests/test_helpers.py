@@ -66,6 +66,15 @@ class TestHelpers:
         assert data["ok"] is False
         assert data["error"] == "inner error"
 
+    def test_unwrap_error_preserves_extra_fields(self):
+        """HTTP 错误保留 status/body：ok:false 且有其他字段时原样透传，不压扁。"""
+        result = unwrap({"ok": False, "error": "HTTP 404: Not Found", "status": 404, "body": "missing"})
+        data = json.loads(result)
+        assert data["ok"] is False
+        assert data["error"] == "HTTP 404: Not Found"
+        assert data["status"] == 404
+        assert data["body"] == "missing"
+
     def test_unwrap_success(self):
         result = unwrap({"ok": True, "data": [1, 2, 3]})
         data = json.loads(result)

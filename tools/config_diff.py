@@ -8,6 +8,19 @@ from pathlib import Path
 
 from ._file_utils import read_file
 
+# 单文件大小上限
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+# value 序列化后超过此长度则截断
+MAX_VALUE_CHARS = 500
+
+
+def _truncate_value(value):
+    """value 序列化后超过 500 字符时截断为 "<截断: 前500字符...>" 形式。"""
+    s = json.dumps(value, ensure_ascii=False, default=str)
+    if len(s) > MAX_VALUE_CHARS:
+        return f"<截断: {s[:MAX_VALUE_CHARS]}...>"
+    return value
+
 
 def diff(file_a: str, file_b: str) -> dict:
     """比较两个配置文件的结构化差异。
@@ -21,6 +34,20 @@ def diff(file_a: str, file_b: str) -> dict:
         return {"ok": False, "error": f"文件不存在: {file_a}"}
     if not pb.exists():
         return {"ok": False, "error": f"文件不存在: {file_b}"}
+
+    for p, name in ((pa, file_a), (pb, file_b)):
+        try:
+            size = p.stat().st_size
+        except OSError as e:
+            return {"ok": False, "error": f"无法读取文件信息: {name}: {e}"}
+        if size > MAX_FILE_SIZE:
+            return {
+                "ok": False,
+                "error": f"文件过大: {name}（{size} 字节）超过 10MB 上限",
+                "file": name,
+                "size": size,
+                "max_size": MAX_FILE_SIZE,
+            }
 
     try:
         obj_a = _load(pa)
@@ -48,11 +75,11 @@ def diff(file_a: str, file_b: str) -> dict:
         in_a = key in obj_a
         in_b = key in obj_b
         if in_a and not in_b:
-            removed[key] = obj_a[key]
+            removed[key] = _truncate_value(obj_a[key])
         elif not in_a and in_b:
-            added[key] = obj_b[key]
+            added[key] = _truncate_value(obj_b[key])
         elif obj_a[key] != obj_b[key]:
-            changed[key] = {"old": obj_a[key], "new": obj_b[key]}
+            changed[key] = {"old": _truncate_value(obj_a[key]), "new": _truncate_value(obj_b[key])}
         else:
             unchanged += 1
 

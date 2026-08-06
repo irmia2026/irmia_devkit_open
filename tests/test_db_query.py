@@ -53,3 +53,21 @@ class TestDbQuery:
         result = query(test_db, "SELECT * FROM users WHERE name = ?", ["' OR 1=1--"])
         assert result["ok"] is True
         assert result["count"] == 0
+
+    def test_truncated_over_200_rows(self, test_db):
+        """超过 200 行时返回 200 行并标记 truncated，不 fetchall 全量。"""
+        conn = sqlite3.connect(test_db)
+        conn.executemany("INSERT INTO users VALUES (?, ?)", [(i, f"u{i}") for i in range(100, 350)])
+        conn.commit()
+        conn.close()
+        result = query(test_db, "SELECT * FROM users")
+        assert result["ok"] is True
+        assert len(result["rows"]) == 200
+        assert result["count"] == 200
+        assert result["truncated"] is True
+
+    def test_not_truncated_within_200_rows(self, test_db):
+        result = query(test_db, "SELECT * FROM users")
+        assert result["ok"] is True
+        assert result["truncated"] is False
+        assert result["count"] == 2

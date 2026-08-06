@@ -24,16 +24,22 @@ def status(cwd: str) -> dict:
         return r
     lines = r["stdout"].split("\n") if r["stdout"] else []
     clean = len(lines) == 0 or all(l == "" for l in lines)
-    return {
+    changes = [line for line in lines if line.strip()]
+    result = {
         "ok": True,
         "clean": clean,
-        "changes": [line for line in lines if line.strip()],
-        "changed_count": len([l for l in lines if l.strip()]),
+        "changes": changes[:200],
+        "changed_count": len(changes),
     }
+    if len(changes) > 200:
+        result["changes_truncated"] = True
+        result["changes_total"] = len(changes)
+    return result
 
 
-def diff(cwd: str, staged: bool = False, filepath: str = None) -> dict:
-    """查看差异。提交前必调用 --staged。返回结构化统计 + raw diff。"""
+def diff(cwd: str, staged: bool = False, filepath: str = None, max_lines: int = 500) -> dict:
+    """查看差异。提交前必调用 --staged。返回结构化统计 + raw diff。
+    diff 超过 max_lines 行时截断并附 diff_truncated/diff_total_lines。"""
     args = ["diff"]
     if staged:
         args.append("--staged")
@@ -51,6 +57,11 @@ def diff(cwd: str, staged: bool = False, filepath: str = None) -> dict:
         stat_args.extend(["--", filepath])
     stat = _run_git(cwd, stat_args)
     result = {"ok": True, "diff": r["stdout"], "stderr": r["stderr"]}
+    diff_lines = r["stdout"].split("\n") if r["stdout"] else []
+    if max_lines > 0 and len(diff_lines) > max_lines:
+        result["diff"] = "\n".join(diff_lines[:max_lines])
+        result["diff_truncated"] = True
+        result["diff_total_lines"] = len(diff_lines)
     # 解析 --stat 最后一行: "1 file changed, 5 insertions(+), 2 deletions(-)"
     if stat["ok"] and stat["stdout"]:
         lines = stat["stdout"].strip().split("\n")
@@ -84,8 +95,9 @@ def log(cwd: str, count: int = 5) -> dict:
     return {"ok": True, "commits": r["stdout"].split("\n") if r["stdout"] else []}
 
 
-def commit(cwd: str, message: str) -> dict:
-    """提交所有更改。提交前必调 diff --staged 自查。"""
+def commit(cwd: str, message: str, files: list = None, force: bool = False) -> dict:
+    """提交更改。默认提交全部；files 指定时仅提交这些文件（仓库内相对路径）。
+    force=True 时跳过 >10 文件拦截。提交前必调 diff --staged 自查。"""
     s = status(cwd)
     if not s.get("ok"):
         return {"ok": False, "error": f"无法获取状态: {s.get('error', '未知')}"}
@@ -96,31 +108,61 @@ def commit(cwd: str, message: str) -> dict:
     if not message:
         return {"ok": False, "error": "提交消息不能为空"}
 
-    changed = s.get("changed_count", 0)
-    if changed > 10:
-        groups = {"Python": [], "Config": [], "Other": []}
-        for f_line in s.get("changes", []):
-            # 解析 git status --porcelain 行：前两位是状态码，第3位起是文件名
-            f_name = f_line[3:] if len(f_line) > 3 and f_line[2] == ' ' else f_line.strip()
-            f_name = f_name.strip()
+    # 校验指定文件：仅允许仓库内相对路径，拒绝绝对路径和 .. 逃逸
+    staged_files = []
+    if files:
+        for f in files:
+            f = str(f).strip().replace("\\", "/")
+            if not f:
+                continue
+            if f.startswith("/") or re.match(r"^[A-Za-z]:", f):
+                return {"ok": False, "error": f"非法文件路径（绝对路径）: {f}"}
+            parts = [p for p in f.split("/") if p not in ("", ".")]
+            if any(p == ".." for p in parts):
+                return {"ok": False, "error": f"非法文件路径（越出仓库）: {f}"}
+            staged_files.append("/".join(parts))
+
+    changed = len(staged_files) if staged_files else s.get("changed_count", 0)
+    if changed > 10 and not force:
+        groups = {"Code": [], "Config": [], "Other": []}
+        if staged_files:
+            names = list(staged_files)
+        else:
+            names = []
+            for f_line in s.get("changes", []):
+                # 解析 git status --porcelain 行：前两位是状态码，第3位起是文件名
+                f_name = f_line[3:] if len(f_line) > 3 and f_line[2] == ' ' else f_line.strip()
+                names.append(f_name.strip())
+        for f_name in names:
             if f_name.endswith((".py", ".nim", ".go")):
-                groups["Python"].append(f_name)
+                groups["Code"].append(f_name)
             elif f_name.endswith((".json", ".yaml", ".yml", ".toml", ".cfg", ".ini")):
                 groups["Config"].append(f_name)
             else:
                 groups["Other"].append(f_name)
+        options = [
+            {"tool": "git_commit", "params": {"cwd": cwd, "message": message, "force": True}},
+        ]
+        if groups["Code"]:
+            options.append({
+                "tool": "git_commit",
+                "params": {"cwd": cwd, "message": message, "files": groups["Code"]},
+            })
         return proposal_reply(
             False,
-            f"{changed}个文件待提交——Python:{len(groups['Python'])} Config:{len(groups['Config'])} Other:{len(groups['Other'])}。建议分批。",
+            f"{changed}个文件待提交——Code:{len(groups['Code'])} Config:{len(groups['Config'])} Other:{len(groups['Other'])}。建议分批。",
             error=f"文件过多 ({changed})——建议分批提交",
             evidence={"file_groups": {k: v for k, v in groups.items() if v}},
-            options=["commit_python_only", "show_all_files", "force_all"],
+            options=options,
             reason="too_many_files",
         )
 
-    files_to_stage = s.get("changes", [])
+    files_to_stage = staged_files if staged_files else s.get("changes", [])
 
-    r1 = _run_git(cwd, ["add", "-A"])
+    if staged_files:
+        r1 = _run_git(cwd, ["add", "--"] + staged_files)
+    else:
+        r1 = _run_git(cwd, ["add", "-A"])
     if not r1["ok"]:
         return {"ok": False, "error": f"git add 失败: {r1.get('stderr', r1.get('error', ''))}"}
 
@@ -166,8 +208,8 @@ def push(cwd: str, remote: str = "origin", branch: str = "") -> dict:
             return {"ok": False, "error": f"无法获取当前分支: {b.get('error')}"}
         branch = b["branch"]
 
-    # 检查是否有未推送的 commit（远程分支不存在时跳过，由后续 push 自己报错）
-    r_check = _run_git(cwd, ["log", f"origin/{branch}..HEAD", "--oneline"])
+    # 检查是否有未推送的 commit（预检失败如远程跟踪分支不存在时跳过，由后续 push 自己报错）
+    r_check = _run_git(cwd, ["log", f"{remote}/{branch}..HEAD", "--oneline"])
     if r_check["ok"]:
         if not r_check["stdout"].strip():
             return {"ok": False, "error": "没有未推送的提交——所有 commit 已在远程"}

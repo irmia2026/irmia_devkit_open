@@ -154,6 +154,11 @@ def _fts_escape_token(s: str) -> str:
 
 # ── code graph engine ─────────────────────────────────
 
+# 已完成 DDL 初始化的 db_path 集合：二次打开同一库时跳过建表，仅做每连接的 PRAGMA。
+# 注意：只有 DDL 全部成功才会写入，DDL 失败不会把 path 留在集合里。
+_ENSURED: set[str] = set()
+
+
 class CodeGraph:
     def __init__(self, db_path: str):
         self._db_path = db_path
@@ -166,6 +171,21 @@ class CodeGraph:
             os.makedirs(db_dir, exist_ok=True)
         conn = sqlite3.connect(self._db_path)
         conn.execute("PRAGMA journal_mode=WAL")
+        key = os.path.abspath(self._db_path)
+        if key in _ENSURED:
+            # DDL 已在首次打开时执行过，直接复用（PRAGMA 是每连接的，仍需执行）
+            self._conn = conn
+            return
+        try:
+            self._create_schema(conn)
+        except Exception:
+            conn.close()
+            raise
+        _ENSURED.add(key)
+        self._conn = conn
+
+    @staticmethod
+    def _create_schema(conn: sqlite3.Connection) -> None:
         conn.execute("""CREATE TABLE IF NOT EXISTS symbols (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -203,7 +223,6 @@ class CodeGraph:
         except Exception as exc:
             logger.debug("codegraph suppressed error: %s", exc, exc_info=True)
         conn.commit()
-        self._conn = conn
 
     def _conn_get(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -484,12 +503,17 @@ class CodeGraph:
             return {"ok": True, "found": False, "query_type": "trace",
                     "summary": f"未找到与 '{query}' 相关的符号。"}
         sname = rows[0][0]
-        callers = [r[0] for r in conn.execute("SELECT from_sym FROM edges WHERE to_sym=? AND kind='calls' LIMIT 8", (sname,)).fetchall()]
-        callees = [r[0] for r in conn.execute("SELECT to_sym FROM edges WHERE from_sym=? AND kind='calls' LIMIT 8", (sname,)).fetchall()]
+        caller_rows = conn.execute("SELECT from_sym, file, line FROM edges WHERE to_sym=? AND kind='calls' LIMIT 50", (sname,)).fetchall()
+        callee_rows = conn.execute("SELECT to_sym, file, line FROM edges WHERE from_sym=? AND kind='calls' LIMIT 50", (sname,)).fetchall()
+        callers = [r[0] for r in caller_rows[:8]]
+        callees = [r[0] for r in callee_rows[:8]]
+        caller_locations = [{"name": r[0], "file": r[1], "line": r[2]} for r in caller_rows]
+        callee_locations = [{"name": r[0], "file": r[1], "line": r[2]} for r in callee_rows]
         sym_info = {"name": rows[0][0], "signature": rows[0][2], "file": rows[0][1]}
         return {"ok": True, "found": True, "query_type": "trace",
                 "summary": f"{sname} 的调用关系：{len(callers)} 调用者, {len(callees)} 被调用者。",
-                "symbol": sym_info, "callers": callers, "callees": callees}
+                "symbol": sym_info, "callers": callers, "callees": callees,
+                "caller_locations": caller_locations, "callee_locations": callee_locations}
 
     def _explore_fallback(self, conn, query: str) -> dict:
         symbols, strategy = self._search(conn, query)
@@ -670,9 +694,14 @@ class CodeGraph:
     # ── related symbols ───────────────────────────────
 
     def _get_related(self, conn, name: str) -> dict:
-        callers = [r[0] for r in conn.execute("SELECT from_sym FROM edges WHERE to_sym=? AND kind='calls' LIMIT 5", (name,)).fetchall()]
-        callees = [r[0] for r in conn.execute("SELECT to_sym FROM edges WHERE from_sym=? AND kind='calls' LIMIT 5", (name,)).fetchall()]
-        return {"callers": callers, "callees": callees}
+        caller_rows = conn.execute("SELECT from_sym, file, line FROM edges WHERE to_sym=? AND kind='calls' LIMIT 50", (name,)).fetchall()
+        callee_rows = conn.execute("SELECT to_sym, file, line FROM edges WHERE from_sym=? AND kind='calls' LIMIT 50", (name,)).fetchall()
+        return {
+            "callers": [r[0] for r in caller_rows[:5]],
+            "callees": [r[0] for r in callee_rows[:5]],
+            "caller_locations": [{"name": r[0], "file": r[1], "line": r[2]} for r in caller_rows],
+            "callee_locations": [{"name": r[0], "file": r[1], "line": r[2]} for r in callee_rows],
+        }
 
     # ── smart source truncation ───────────────────────
 
@@ -1260,11 +1289,14 @@ def _resolve_references(conn):
     for (qn,) in conn.execute("SELECT name FROM symbols").fetchall():
         short = qn.rsplit(".", 1)[-1]
         name_index[short].append(qn)
-    for eid, to_sym, _ in conn.execute("SELECT id, to_sym, kind FROM edges WHERE kind='calls'").fetchall():
+    updates: list[tuple[str, int]] = []
+    for eid, to_sym, _ in conn.execute("SELECT id, to_sym, kind FROM edges WHERE kind='calls' AND resolved=0").fetchall():
         if "." not in to_sym and to_sym in name_index:
             candidates = name_index[to_sym]
             if len(candidates) == 1:
-                conn.execute("UPDATE edges SET to_sym=?, resolved=1 WHERE id=?", (candidates[0], eid))
+                updates.append((candidates[0], eid))
+    if updates:
+        conn.executemany("UPDATE edges SET to_sym=?, resolved=1 WHERE id=?", updates)
 
     # Phase 2: cross-file import resolution (optimized: batch resolve)
     from collections import defaultdict as dd2
@@ -1297,6 +1329,7 @@ def _resolve_references(conn):
         "WHERE e.kind='calls' AND e.resolved=0"
     ).fetchall()
 
+    updates = []
     for eid, from_sym, to_sym, from_file in unresolved:
         imports = file_imports.get(from_file)
         if not imports:
@@ -1317,13 +1350,16 @@ def _resolve_references(conn):
             # fallback: original prefix matching on dotted symbol names
             candidates.update(symbol_prefix_map.get((imp, to_sym), []))
         if len(candidates) == 1:
-            conn.execute("UPDATE edges SET to_sym=?, resolved=1 WHERE id=?", (candidates.pop(), eid))
+            updates.append((candidates.pop(), eid))
+    if updates:
+        conn.executemany("UPDATE edges SET to_sym=?, resolved=1 WHERE id=?", updates)
 
     # Phase 3: self.method() / cls.method() resolution
     unresolved = conn.execute(
         "SELECT e.id, e.from_sym, e.to_sym FROM edges e "
         "WHERE e.kind='calls' AND e.resolved=0 AND e.to_sym NOT LIKE '%.%' AND e.to_sym NOT LIKE '%(%'"
     ).fetchall()
+    updates = []
     for eid, from_sym, to_sym in unresolved:
         cls_prefix = _class_of(from_sym)
         if not cls_prefix:
@@ -1331,7 +1367,9 @@ def _resolve_references(conn):
         candidate = f"{cls_prefix}.{to_sym}"
         sr = conn.execute("SELECT name FROM symbols WHERE name=? LIMIT 1", (candidate,)).fetchone()
         if sr:
-            conn.execute("UPDATE edges SET to_sym=?, resolved=1 WHERE id=?", (sr[0], eid))
+            updates.append((sr[0], eid))
+    if updates:
+        conn.executemany("UPDATE edges SET to_sym=?, resolved=1 WHERE id=?", updates)
 
 
 # ── BFS ───────────────────────────────────────────────

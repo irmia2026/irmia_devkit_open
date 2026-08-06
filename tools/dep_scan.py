@@ -9,6 +9,28 @@ from pathlib import Path
 
 from ._file_utils import read_file_with_encoding
 
+# 扫描时排除的目录（按路径 parts 判断）
+_EXCLUDE_DIRS = {
+    "__pycache__", ".git", ".venv", "venv", "node_modules",
+    ".tox", "dist", "build", ".mypy_cache", ".pytest_cache",
+}
+
+
+def _module_name(root: Path, f: Path) -> str | None:
+    """把项目内 .py 文件映射为模块名（相对路径去 .py、os.sep 转 "."）。"""
+    try:
+        rel = f.relative_to(root)
+    except ValueError:
+        return None
+    parts = list(rel.with_suffix("").parts)
+    if not parts:
+        return None
+    if parts[-1] == "__init__":
+        parts.pop()
+    if not parts:
+        return None
+    return ".".join(parts)
+
 
 def scan(project_dir: str = ".", timeout: int = 10) -> dict:
     """扫描 Python 项目 import 依赖图，检测循环引用。
@@ -23,36 +45,53 @@ def scan(project_dir: str = ".", timeout: int = 10) -> dict:
 
     dep_graph: dict[str, set[str]] = {}
     deadline = time.time() + timeout
-    scanned = 0
+
+    # 第一遍：收集项目内模块名集合
+    module_of: dict[Path, str] = {}
     for f in root.rglob("*.py"):
-        if "__pycache__" in str(f) or ".git" in f.parts:
+        if _EXCLUDE_DIRS & set(f.parts):
             continue
+        mod = _module_name(root, f)
+        if mod:
+            module_of[f] = mod
+    module_names = set(module_of.values())
+    top_level_names = {m.split(".")[0] for m in module_names}
+
+    # 第二遍：提取 import，只保留落在项目内模块集合中的依赖
+    scanned = 0
+    timed_out = False
+    for f, mod in module_of.items():
         scanned += 1
         if time.time() > deadline:
-            cycles = _find_cycles(dep_graph)
-            return {
-                "ok": True,
-                "root": str(root),
-                "files_scanned": len(dep_graph),
-                "dependencies": {k: sorted(v) for k, v in dep_graph.items()},
-                "cycles": cycles,
-                "has_cycles": len(cycles) > 0,
-                "partial": True,
-                "note": f"超时 ({timeout}s)，已扫描 {len(dep_graph)}/{scanned} 文件",
-                "proposal": f"依赖扫描部分完成——超时({timeout}s)仅扫描{len(dep_graph)}/{scanned}文件",
-                "options": [
-                    "接受部分结果",
-                    "增加 timeout 参数",
-                    "缩小 project_dir 范围",
-                ],
-            }
+            timed_out = True
+            scanned -= 1  # 超时文件未扫描，不计入
+            break
         try:
             deps = _extract_imports(f)
+            deps = {d for d in deps if d in top_level_names or d in module_names}
             if deps:
-                key = str(f.relative_to(root))
-                dep_graph[key] = deps
+                dep_graph[mod] = deps
         except Exception:
             scanned -= 1  # 不计入成功扫描
+
+    if timed_out:
+        cycles = _find_cycles(dep_graph)
+        return {
+            "ok": True,
+            "root": str(root),
+            "files_scanned": len(dep_graph),
+            "dependencies": {k: sorted(v) for k, v in dep_graph.items()},
+            "cycles": cycles,
+            "has_cycles": len(cycles) > 0,
+            "partial": True,
+            "note": f"超时 ({timeout}s)，已扫描 {len(dep_graph)}/{scanned} 文件",
+            "proposal": f"依赖扫描部分完成——超时({timeout}s)仅扫描{len(dep_graph)}/{scanned}文件",
+            "options": [
+                "接受部分结果",
+                "增加 timeout 参数",
+                "缩小 project_dir 范围",
+            ],
+        }
 
     cycles = _find_cycles(dep_graph)
 

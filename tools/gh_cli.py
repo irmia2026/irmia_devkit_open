@@ -53,7 +53,7 @@ def _run_gh(args: list[str], cwd: str = None, timeout: int = 20) -> dict:
                 install_hint = "安装 GitHub CLI: apt install gh 或 dnf install gh"
             result["proposal"] = (
                 f"{result.get('stderr', result.get('error', ''))}。"
-                f"如已安装 gh CLI，用 rg_search('gh') 找到路径后填入 config.json 的 gh_path；"
+                f"如已安装 gh CLI，用 es_search('gh.exe') 找到路径后填入 config.json 的 gh_path；"
                 f"或 {install_hint}"
             )
     return result
@@ -284,6 +284,42 @@ def run_list(cwd: str, limit: int = 5) -> dict:
         return {"ok": True, "runs": data, "count": len(data)}
     except json.JSONDecodeError:
         return {"ok": True, "raw": r["stdout"]}
+
+
+def run_view(run_id: int, cwd: str = ".") -> dict:
+    """查看 CI 运行详情（含 jobs）。"""
+    r = _run_gh(
+        [
+            "run",
+            "view",
+            str(run_id),
+            "--json",
+            "name,status,conclusion,headBranch,createdAt,jobs",
+        ],
+        cwd=cwd,
+    )
+    if not r["ok"]:
+        return r
+    try:
+        data = json.loads(r["stdout"])
+        if isinstance(data, dict):
+            return {"ok": True, **data}
+        return {"ok": True, "raw": r["stdout"]}
+    except json.JSONDecodeError:
+        return {"ok": True, "raw": r["stdout"]}
+
+
+def run_logs(run_id: int, cwd: str = ".", max_chars: int = 8000) -> dict:
+    """查看 CI 运行日志。输出截断到 max_chars，保留末尾（日志尾部更重要）。"""
+    r = _run_gh(["run", "view", str(run_id), "--log"], cwd=cwd, timeout=60)
+    if not r["ok"]:
+        return r
+    logs = r["stdout"]
+    result = {"ok": True, "logs": logs, "total_chars": len(logs)}
+    if len(logs) > max_chars:
+        result["logs"] = logs[-max_chars:]
+        result["truncated"] = True
+    return result
 
 
 def repo_create(

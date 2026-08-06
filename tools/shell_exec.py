@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -178,6 +179,16 @@ def _resolve_cwd(project_dir: str) -> Path:
     return target
 
 
+def _resolve_executable(args: list[str]) -> list[str]:
+    """用 shutil.which 把 argv[0] 解析为全路径（Windows 上 npx/npm 是 .cmd 脚本，
+    shell=False 时直接按名调用会 FileNotFoundError）。解析失败保留原命令名，
+    交由现有的 FileNotFoundError 降级逻辑处理。"""
+    resolved = shutil.which(args[0])
+    if resolved:
+        return [resolved] + args[1:]
+    return args
+
+
 def run(
     cmd: str,
     project_dir: str = ".",
@@ -238,13 +249,13 @@ def run(
     start = time.monotonic()
     try:
         completed = subprocess.run(
-            args,
+            _resolve_executable(args),
             cwd=str(cwd),
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=max(1, int(timeout)),
+            timeout=min(max(1, int(timeout)), 600),
             shell=False,
             env=env,
         )

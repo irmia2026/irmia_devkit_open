@@ -97,6 +97,15 @@ def _apply_byte_limit(content: str, encoding: str) -> tuple[str, bool]:
     return _truncate_string_to_byte_limit(content, MAX_BYTES_PER_CALL, encoding), True
 
 
+def _format_content(lines: list[str], start_line: int, line_numbers: bool) -> str:
+    """拼接文本内容；line_numbers=True 时带真实行号前缀（右对齐 6 位 + "│ "）。"""
+    if not line_numbers:
+        return '\n'.join(lines)
+    return '\n'.join(
+        f"{n:>6}│ {line}" for n, line in enumerate(lines, start=start_line)
+    )
+
+
 def _build_header(
     path: Path,
     total_lines: int,
@@ -225,18 +234,30 @@ def _get_metadata(path: str | Path) -> dict[str, Any]:
     }
 
 
+# python-magic 可用性惰性缓存：None=未探测，True/False=探测结果
+_HAS_MAGIC: bool | None = None
+
+
 def _get_mime_type(path: str | Path) -> str:
     """获取文件 MIME 类型。"""
+    global _HAS_MAGIC
     p = Path(path)
     mime, _ = mimetypes.guess_type(str(p))
     if mime:
         return mime
-    
-    try:
-        import magic
-        return magic.from_file(str(p), mime=True)
-    except Exception:
-        pass
+
+    if _HAS_MAGIC is None:
+        try:
+            import magic  # noqa: F401
+            _HAS_MAGIC = True
+        except Exception:
+            _HAS_MAGIC = False
+    if _HAS_MAGIC:
+        try:
+            import magic
+            return magic.from_file(str(p), mime=True)
+        except Exception:
+            pass
     
     ext = p.suffix.lower()
     mime_map = {
@@ -636,11 +657,8 @@ def read(
     mode: str = 'auto',
     head: int = 0,
     tail: int = 0,
-    max_depth: int = 3,
-    include_metadata: bool = True,
-    recursive: bool = False,
-    max_entries: int = 50,
-    include_hidden: bool = False,
+    line_numbers: bool = True,
+    include_metadata: bool = False,
 ) -> dict:
     """增强版安全文件读取工具。
 
@@ -655,10 +673,8 @@ def read(
         mode: 模式：auto / text / binary / hex / skeleton
         head: 读取前 N 行（优先级高于 start_line/end_line）
         tail: 读取后 N 行（优先级高于 start_line/end_line）
+        line_numbers: 文本模式输出是否带行号前缀（默认 True，hex/binary/skeleton 不受影响）
         include_metadata: 是否包含文件元信息
-        recursive: 已弃用：目录读取已移除
-        max_entries: 已弃用：目录读取已移除
-        include_hidden: 已弃用：目录读取已移除
     """
     # 0. 参数校验
     if not path or not isinstance(path, (str, os.PathLike)):
@@ -847,12 +863,12 @@ def read(
         lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
         has_more = has_more or byte_truncated
 
-        content = '\n'.join(lines)
+        start_line = 1
+        end_line = len(lines)
+        content = _format_content(lines, start_line, line_numbers)
         content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
         byte_truncated = byte_truncated or byte_truncated_after
 
-        start_line = 1
-        end_line = len(lines)
         has_more = has_more or byte_truncated
         next_call, options = _build_next_call_and_options(str(p), start_line, end_line, total_lines, mode="head")
         header = _build_header(p, total_lines, file_size, detected_encoding, metadata.get('human_size'))
@@ -886,7 +902,7 @@ def read(
         lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
         has_more = has_more or byte_truncated
 
-        content = '\n'.join(lines)
+        content = _format_content(lines, start_line, line_numbers)
         content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
         byte_truncated = byte_truncated or byte_truncated_after
 
@@ -947,7 +963,7 @@ def read(
             next_call={"tool": "safe_read", "args": {"path": str(p), "tail": tail_n}},
         )
 
-    content = '\n'.join(lines)
+    content = _format_content(lines, actual_start, line_numbers)
     content, byte_truncated_after = _apply_byte_limit(content, detected_encoding)
     byte_truncated = byte_truncated or byte_truncated_after
     has_more = has_more or byte_truncated

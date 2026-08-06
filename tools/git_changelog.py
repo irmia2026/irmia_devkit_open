@@ -9,6 +9,20 @@ from pathlib import Path
 from ._helpers import _run_cmd
 
 
+# 分类顺序稳定：feat/fix/perf/refactor/docs/test/chore/build/ci，other 兜底
+_CATEGORIES = [
+    ("features", r"^feat[\s(:]"),
+    ("fixes", r"^fix[\s(:]"),
+    ("perf", r"^perf[\s(:]"),
+    ("refactors", r"^refactor[\s(:]"),
+    ("docs", r"^docs[\s(:]"),
+    ("tests", r"^test[\s(:]"),
+    ("chore", r"^chore[\s(:]"),
+    ("build", r"^build[\s(:]"),
+    ("ci", r"^ci[\s(:]"),
+]
+
+
 def changelog(cwd: str, count: int = 30) -> dict:
     """从 git log 生成分类 changelog。
 
@@ -24,20 +38,17 @@ def changelog(cwd: str, count: int = 30) -> dict:
         return {"ok": False, "error": r.get("error", f"git log 失败: {r.get('stderr', '')}"), "cwd": cwd}
 
     lines = [l.strip() for l in r["stdout"].strip().split("\n") if l.strip()]
-    categories = {"features": [], "fixes": [], "refactors": [], "docs": [], "other": []}
+    categories = {key: [] for key, _ in _CATEGORIES}
+    categories["other"] = []
 
     for line in lines:
         # skip the leading hash
         m = re.match(r"^\S+\s+(.*)$", line)
         msg = m.group(1) if m else line
-        if re.match(r"^feat[\s(:]", msg, re.IGNORECASE):
-            categories["features"].append(msg)
-        elif re.match(r"^fix[\s(:]", msg, re.IGNORECASE):
-            categories["fixes"].append(msg)
-        elif re.match(r"^refactor[\s(:]", msg, re.IGNORECASE):
-            categories["refactors"].append(msg)
-        elif re.match(r"^docs[\s(:]", msg, re.IGNORECASE):
-            categories["docs"].append(msg)
+        for key, pattern in _CATEGORIES:
+            if re.match(pattern, msg, re.IGNORECASE):
+                categories[key].append(msg)
+                break
         else:
             categories["other"].append(msg)
 

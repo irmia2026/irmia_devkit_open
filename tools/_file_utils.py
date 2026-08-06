@@ -6,6 +6,7 @@ _file_utils — 文件读取共享代码。
 import difflib
 import hashlib
 import os
+import re
 from pathlib import Path
 
 
@@ -160,11 +161,6 @@ def detect_encoding(path: str | Path, sample_size: int = _PROBE_BYTES) -> str:
     return "latin-1"
 
 
-def _detect_encoding(path: str | Path) -> str:
-    """兼容旧内部名。"""
-    return detect_encoding(path)
-
-
 def is_binary_file(path: str | Path, sample_size: int = 8192) -> tuple[bool, str]:
     """检测文件是否为二进制文件，返回 (is_binary, reason)。"""
     p = Path(path)
@@ -298,6 +294,64 @@ def backup_name_stem(p: Path) -> str:
     parent_str = str(p.parent.resolve()).replace("\\", "/")
     dir_hash = hashlib.sha256(parent_str.encode("utf-8")).hexdigest()[:8]
     return f"{p.name}.{dir_hash}"
+
+
+# 备份文件名规则：{backup_name_stem}.{时间戳}[.{种类}].bak
+#   时间戳为 %Y%m%d_%H%M%S_%f（safe_edit/safe_write/multi_edit）
+#   或 %Y%m%d%H%M%S（rollback 的 prerollback 快照）
+_BACKUP_NAME_RE = re.compile(
+    r"^(?P<stem>.+\.[0-9a-f]{8})\.(?:\d{8}_\d{6}_\d{6}|\d{14})(?:\.[a-z]+)?\.bak$"
+)
+
+
+def prune_backups(backup_dir: str, keep_per_file: int = 10, max_total_mb: int = 500) -> None:
+    """清理备份目录：每个源文件保留最近 keep_per_file 份，再按总大小 LRU 淘汰最旧的。
+
+    按备份文件名主干（源文件名+目录哈希）分组，组内按 mtime 保留最新若干份；
+    随后统计幸存备份总大小，超过 max_total_mb 时从最旧开始删除直到达标。
+    用 os.scandir 单次扫描（Windows 上缓存 stat 数据），避免每次编辑付出显著开销。
+    防御性设计：任何异常静默吞掉——备份清理绝不能弄挂编辑主流程。
+    """
+    try:
+        if not os.path.isdir(backup_dir):
+            return
+        # (path, mtime, size) 三元组，stat 数据来自 scandir 缓存
+        groups: dict[str, list[tuple[str, float, int]]] = {}
+        with os.scandir(backup_dir) as it:
+            for entry in it:
+                try:
+                    if not entry.name.endswith(".bak") or not entry.is_file():
+                        continue
+                    st = entry.stat()
+                except OSError:
+                    continue
+                m = _BACKUP_NAME_RE.match(entry.name)
+                key = m.group("stem") if m else entry.name
+                groups.setdefault(key, []).append((entry.path, st.st_mtime, st.st_size))
+        keep = max(keep_per_file, 0)
+        survivors: list[tuple[str, float, int]] = []
+        for files in groups.values():
+            files.sort(key=lambda t: t[1], reverse=True)
+            survivors.extend(files[:keep])
+            for path, _, _ in files[keep:]:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+        # 全局 LRU：总大小超限，从最旧开始淘汰
+        max_bytes = max_total_mb * 1024 * 1024
+        survivors.sort(key=lambda t: t[1])
+        total = sum(t[2] for t in survivors)
+        for path, _, size in survivors:
+            if total <= max_bytes:
+                break
+            try:
+                os.unlink(path)
+                total -= size
+            except OSError:
+                pass
+    except Exception:
+        pass
 
 
 def find_closest_line(content: str, old: str, threshold: float = 0.5) -> dict | None:

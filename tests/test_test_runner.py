@@ -53,3 +53,17 @@ class TestTestRunner:
         assert result["ok"] is False
         assert result["timeout"] is True
         assert "1 failed" in result["raw_summary"]
+
+    def test_timeout_clamped_to_600(self, tmp_dir, monkeypatch):
+        """timeout 上限 600 秒。"""
+        captured = {}
+
+        def fake_run(*args, **kwargs):
+            captured["timeout"] = kwargs["timeout"]
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+        monkeypatch.setattr("tools.test_runner.subprocess.run", fake_run)
+
+        test_runner.run(project_dir=tmp_dir, timeout=99999)
+
+        assert captured["timeout"] == 600

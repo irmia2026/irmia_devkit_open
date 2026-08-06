@@ -141,8 +141,25 @@ def run(old: str, new: str, project_dir: str = ".", dry_run: bool = True, confir
                 "conflicts": [dict(row) for row in conflicts[:20]],
             }
         files = _indexed_python_files(conn, project_dir, old_short)
+        row = conn.execute("SELECT value FROM meta WHERE key='last_index'").fetchone()
+        last_index = float(row[0]) if row else 0.0
     finally:
         conn.close()
+
+    # 索引新鲜度检查：索引后被修改的文件可能让冲突检测不完整
+    stale = 0
+    for path in files:
+        try:
+            if path.stat().st_mtime > last_index:
+                stale += 1
+        except OSError:
+            pass
+    stale_warning = ""
+    if stale:
+        stale_warning = (
+            f"{stale} 个文件在索引后被修改，冲突检测可能不完整，"
+            "建议先 code_index(incremental=true)"
+        )
 
     refs = []
     edits = []
@@ -179,6 +196,8 @@ def run(old: str, new: str, project_dir: str = ".", dry_run: bool = True, confir
         "diffs": diffs,
         "indexed_symbols": [dict(row) for row in old_rows[:20]],
     }
+    if stale_warning:
+        result["stale_warning"] = stale_warning
     if dry_run:
         return result
 
@@ -196,6 +215,7 @@ def run(old: str, new: str, project_dir: str = ".", dry_run: bool = True, confir
                       "diffs": result.get("diffs", []),
                       "total_refs": result.get("total_refs", 0)},
             options=["dry_run=true to review diffs", "confirm_multi_file=true to proceed", "cancel"],
+            **({"stale_warning": stale_warning} if stale_warning else {}),
         )
 
     applied = multi_edit_run(edits, syntax_check=True)

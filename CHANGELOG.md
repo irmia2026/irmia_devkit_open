@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.6.4 — 全量 code review 修复：响应协议 / 备份生命周期 / 行号寻址编辑 / CI 日志
+
+- **safe_edit 行号寻址**: 新增 `mode=insert_at_line`（`line` 后插入，`0`=文件开头）/ `delete_lines`（`start_line~end_line` 闭区间删除），走完整备份→语法检查→回滚链路；参数 `preserve_inner_indent` 更名 `align_whitespace`（语义不变）。
+- **git_commit 修复**: >10 文件拦截的 options 从死胡同文案改为可执行 next_call（`force=true` / `files=[...]`）；新增 `files`（选择性暂存，拒绝绝对路径与 `..` 逃逸）与 `force` 参数；描述明示默认 `git add -A`。
+- **gh_repo CI 日志**: 新增 `run_view` / `run_logs` action（`run_id` 参数），CI 失败可取日志尾部自诊断。
+- **safe_read 行号**: 文本读取默认带行号前缀（`  123│ 内容`，新增 `line_numbers` 参数可关）；删除 4 个已弃用 schema 参数；`include_metadata` 默认改 false。
+- **file_patch**: 新增 `occurrence` 参数消歧多处匹配；proposal 文案引导。
+- **multi_edit**: 多处匹配错误透传结构化 `matches`（行号/列/预览，对齐 safe_edit），不再随异常丢弃。
+- **备份生命周期**: 新增 `prune_backups`（每文件保留 10 份 + 总量 500MB LRU，`os.scandir` 实现零感开销）；patch 失败不再残留无意义备份。
+- **dep_scan 修复**: 循环引用检测从事实上失效（图键与依赖命名空间不匹配）修复为可检出；排除目录扩展至 .venv/node_modules 等 10 个。
+- **codegraph 性能**: `_resolve_references` 增加 `resolved=0` 过滤 + `executemany` 批量提交；`_ensure_db` DDL 幂等跳过（每路径一次）；`code_explore` 返回 `caller_locations`/`callee_locations` 引用位置。
+- **http_get**: 默认 `format=markdown`（原 html 为 token 黑洞且无分页）；返回新增 `converter` 字段；html 截断附切换格式 hint；页面缓存加 300s TTL。
+- **http_post**: schema 暴露 `timeout` 参数；data 描述与实际行为对齐。
+- **http_download**: 描述明示仅存文件名、实际落沙箱 `~/.irmia/downloads/`。
+- **unwrap 协议修复**: `ok:false` 且含额外字段时不再压扁丢弃（http_get 错误的 status/body 现在可见）。
+- **git_smart**: `git_diff` 新增 `max_lines`（默认 500）截断 + `diff_truncated` 标记；`git_status` changes cap 200；`git_push` 预检改用传入的 remote（原硬编码 origin）。
+- **db_query**: `fetchall` → `fetchmany(201)`，大表不再全量物化，附 `truncated` 标记；params schema 类型修正（原声明 string 数组与示例矛盾）。
+- **port_check**: 实测返回 `latency_ms`（docstring 承诺已久）；移除误导性 next_call；scan 上限 256 端口。
+- **shell_exec/test_runner**: timeout 统一钳制上限 600s；Windows 下 `npx`/`npm` 经 `shutil.which` 解析为 `.cmd` 全路径（原直接 FileNotFoundError）。
+- **rg_search**: rg 路径匹配行截断 200 字符（与 Python fallback 对齐）；`context_lines` clamp ≤10；rg 加 `-m` 提前限量。
+- **es_search**: Windows 无 es.exe 时默认搜索根改为用户目录（原遍历当前盘符根）；POSIX fallback 忽略 regex/whole_word/sort_by 时附 note 说明；文案笔误修复。
+- **symbol_rename**: 索引后修改的文件触发 `stale_warning` 提示先增量重建索引。
+- **lint_runner**: ruff/linter 探测结果 300s 模块级缓存，消除每次调用的探测子进程。
+- **config_diff**: 单文件 10MB 上限；大 value 截断 500 字符。
+- **dir_list**: 条目补 `mtime` 字段（描述承诺已久）。
+- **op_log**: 审计写入移出事件循环线程（run_sync 线程池化）。
+- **git_changelog**: 分类前缀扩展为 feat/fix/perf/refactor/docs/test/chore/build/ci 九类。
+- **工程清理**: 删除死文件 `tools/_registry_split.py` 与无调用方的 `_detect_encoding` 别名；文档工具计数 64→65；`time` convert 空参返回明确错误（原静默返回 1970-01-01）。
+- **测试**: 全量 661 passed、8 skipped（新增约 60 条回归用例）；ruff 零新增告警。
+
 ## v2.6.3 — http_get 分页翻页 / 嵌套函数缩进修复 / schema 一致性对齐
 
 - **http_get 分页翻页**: 页大小 8000 字符，模块级 LRU 缓存（10 条），`offset` 参数切页；返回 `has_more` + `next_call` + `options` 三件套，agent 盲传即可翻页，不重复下载。

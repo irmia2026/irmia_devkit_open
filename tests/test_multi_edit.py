@@ -64,6 +64,23 @@ class TestMultiEdit:
         assert r["ok"] is False
         assert "appears 2 times" in r["error"]
 
+    def test_ambiguous_match_includes_matches_evidence(self, tmp_file):
+        """B6: 多匹配歧义错误应携带 matches 证据，与 safe_edit 响应形态对齐。"""
+        Path(tmp_file).write_text("x = 1\ny = 1\nz = 1\n", encoding="utf-8")
+        r = run([{"file": tmp_file, "old": "= 1", "new": "= 2"}])
+        assert r["ok"] is False
+        assert r["occurrence_count"] == 3
+        assert len(r["matches"]) == 3
+        assert r["matches"][0]["line"] == 1
+        assert r["matches"][1]["line"] == 2
+        assert r["evidence"]["occurrence_count"] == 3
+        assert len(r["evidence"]["matches"]) == 3
+        assert any("occurrence" in str(o) for o in r["options"])
+        assert any("replace_all" in str(o) for o in r["options"])
+        assert "proposal" in r
+        # 歧义错误不应修改文件
+        assert Path(tmp_file).read_text(encoding="utf-8") == "x = 1\ny = 1\nz = 1\n"
+
     def test_crlf_file_with_lf_old(self, tmp_file):
         """文件 CRLF，old 用 LF 也能匹配，并保留 CRLF。"""
         Path(tmp_file).write_bytes(b"def foo():\r\n    x = 1\r\n    y = 2\r\n")

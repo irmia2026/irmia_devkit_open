@@ -84,6 +84,8 @@ from .gh_cli import (
     repo_view as _gh_repo_view,
     repo_create as _gh_repo_create,
     run_list as _gh_run_list,
+    run_view as _gh_run_view,
+    run_logs as _gh_run_logs,
     auth_status as _gh_auth_status,
 )
 from .log_parse import parse as _log_parse
@@ -230,16 +232,16 @@ def _port_check_w(host: str = "127.0.0.1", ports: list | None = None) -> dict:
 
 SafeEditTool = make_tool(
     "safe_edit",
-    "【改代码文件唯一选择】安全编辑：自动备份→精确替换→语法检查→通过保留/失败自动回滚。支持 .py/.nim/.go/.js/.ts（语法检查）+ 其他扩展名（跳过语法检查）。不要用 file_write 改已有代码（无备份无回滚）。不要用 astrbot_file_edit_tool 改代码（无备份无语法检查）。非代码文件（.md/.txt/.json）可以用 file_patch 或 safe_edit，两者均可。单文件单改优选；跨文件批量/同一文件多改 → 用 multi_edit（原子提交，继承本工具的空白容错能力）。当 old 文本在文件中多处匹配时，工具会报错并列出所有位置——用 occurrence=N 指定第几次出现继续。",
+    "【改代码文件唯一选择】安全编辑：自动备份→精确替换→语法检查→通过保留/失败自动回滚。支持 .py/.nim/.go/.js/.ts（语法检查）+ 其他扩展名（跳过语法检查）。不要用 file_write 改已有代码（无备份无回滚）。不要用 astrbot_file_edit_tool 改代码（无备份无语法检查）。非代码文件（.md/.txt/.json）可以用 file_patch 或 safe_edit，两者均可。单文件单改优选；跨文件批量/同一文件多改 → 用 multi_edit（原子提交，继承本工具的空白容错能力）。当 old 文本在文件中多处匹配时，工具会报错并列出所有位置——用 occurrence=N 指定第几次出现继续。mode: replace(默认，old/new 文本替换) / insert_at_line(在 line 行后插入 new，line=0 为文件开头) / delete_lines(删除 start_line~end_line 闭区间行)。",
     {
             "type": "object",
             "properties": {
                 "filepath": {"type": "string", "description": "文件路径"},
                 "old": {
                     "type": "string",
-                    "description": "要被替换的旧文本（精确匹配，包括缩进）",
+                    "description": "要被替换的旧文本（精确匹配，包括缩进）。mode=replace 时必填",
                 },
-                "new": {"type": "string", "description": "替换后的新文本"},
+                "new": {"type": "string", "description": "替换后的新文本。mode=replace/insert_at_line 时必填"},
                 "replace_all": {
                     "type": "boolean",
                     "description": "是否替换所有匹配项，默认 false",
@@ -250,13 +252,34 @@ SafeEditTool = make_tool(
                     "description": "替换第 N 次出现（1-based）。当多处匹配时用于消歧",
                     "default": 0,
                 },
-                "preserve_inner_indent": {
+                "align_whitespace": {
                     "type": "boolean",
-                    "description": "缩进对齐时保留嵌套函数的内部缩进结构，默认 true（自动）。设为 false 可手动关闭。仅在 new 含嵌套 def/class 且缩进异常时考虑关闭。",
+                    "description": "old 缩进差一两格时自动对齐行首空白后重试，默认 true。仅在替换结果缩进异常时设为 false。",
                     "default": True,
                 },
+                "mode": {
+                    "type": "string",
+                    "description": "编辑模式：replace(默认) / insert_at_line / delete_lines",
+                    "enum": ["replace", "insert_at_line", "delete_lines"],
+                    "default": "replace",
+                },
+                "line": {
+                    "type": "integer",
+                    "description": "mode=insert_at_line 时在此行号之后插入（0=文件开头）",
+                    "default": 0,
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "mode=delete_lines 时的起始行号（1-based，闭区间）",
+                    "default": 0,
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "mode=delete_lines 时的结束行号（闭区间）",
+                    "default": 0,
+                },
             },
-            "required": ["filepath", "old", "new"],
+            "required": ["filepath"],
         },
     _safe_edit,
 )
@@ -313,6 +336,11 @@ FilePatchTool = make_tool(
                     "type": "boolean",
                     "description": "是否替换所有匹配项",
                     "default": False,
+                },
+                "occurrence": {
+                    "type": "integer",
+                    "description": "替换第 N 次出现（1-based），0=替换第一处。多处匹配时用于消歧",
+                    "default": 0,
                 },
                 "preserve_inner_indent": {
                     "type": "boolean",
@@ -393,6 +421,11 @@ GitDiffTool = make_tool(
                     "default": False,
                 },
                 "filepath": {"type": "string", "description": "只看指定文件，可选"},
+                "max_lines": {
+                    "type": "integer",
+                    "description": "diff 输出最大行数，超出截断并附 diff_truncated 标记，默认 500",
+                    "default": 500,
+                },
             },
             "required": ["cwd"],
         },
@@ -421,12 +454,22 @@ GitLogTool = make_tool(
 
 GitCommitTool = make_tool(
     "git_commit",
-    "【替代 git commit——首选】提交并自动生成结构化反馈（files_staged 列表 + 提案）。比原生 git commit 多一层失败诊断。message 用 fix:/feat:/refactor: 格式。",
+    "【替代 git commit——首选】提交并自动生成结构化反馈（files_staged 列表 + 提案）。比原生 git commit 多一层失败诊断。message 用 fix:/feat:/refactor: 格式。默认暂存全部变更（git add -A，含未跟踪文件）；只想提交部分文件请传 files。变更超过 10 个文件会被拦截并要求确认（force=true 强制提交）。",
     {
             "type": "object",
             "properties": {
                 "cwd": {"type": "string", "description": "Git 仓库路径"},
                 "message": {"type": "string", "description": "提交信息（简洁描述）"},
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "只暂存并提交指定文件（仓库相对路径列表），不传则暂存全部变更",
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "变更超 10 个文件被拦截时，传 true 强制提交",
+                    "default": False,
+                },
             },
             "required": ["cwd", "message"],
         },
@@ -562,7 +605,7 @@ RgSearchTool = make_tool(
 
 HttpGetTool = make_tool(
     "http_get",
-    "【HTTP GET 唯一选择】HTTP GET 请求 + 智能内容转换。不要用 astrbot_execute_shell 跑 curl——它无 SSRF（内网 IP）防护。默认返回原始 HTML（5000 字符截断）。支持 format='markdown' 转为 LLM 友好 Markdown，format='text' 提取纯文本正文；extract=true 先提取正文再转换（trafilatura 去广告/导航/页脚），默认 false 全页转换。15s 超时。",
+    "【HTTP GET 唯一选择】HTTP GET 请求 + 智能内容转换。不要用 astrbot_execute_shell 跑 curl——它无 SSRF（内网 IP）防护。默认 format='markdown' 转为 LLM 友好 Markdown 并支持 offset 分页翻页；format='text' 提取纯文本正文；format='html' 返回原始 HTML（5000 字符截断，无分页，仅调试用）。extract=true 先提取正文再转换（trafilatura 去广告/导航/页脚），默认 false 全页转换。15s 超时。",
     {
             "type": "object",
             "properties": {
@@ -570,9 +613,9 @@ HttpGetTool = make_tool(
                 "headers": {"type": "object", "description": "自定义请求头，可选"},
                 "format": {
                     "type": "string",
-                    "description": "输出格式：html(默认，返回原始HTML) | markdown(LLM友好的Markdown) | text(纯文本正文)",
+                    "description": "输出格式：markdown(默认，LLM友好，支持offset分页) | text(纯文本正文，支持分页) | html(原始HTML，截断5000字符且无分页)",
                     "enum": ["html", "markdown", "text"],
-                    "default": "html",
+                    "default": "markdown",
                 },
                 "extract": {
                     "type": "boolean",
@@ -586,7 +629,7 @@ HttpGetTool = make_tool(
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "分页偏移量（字符数），0=从头读取。首次不用传，翻页时通过 next_call 透传",
+                    "description": "分页偏移量（字符数），0=从头读取。仅对 markdown/text 生效；首次不用传，翻页时通过 next_call 透传",
                     "default": 0,
                 },
             },
@@ -604,7 +647,7 @@ class HttpPostTool(FunctionTool):
     description: str = (
         "【HTTP POST 唯一选择】HTTP POST 请求。"
         "不要用 astrbot_execute_shell 跑 curl（它无 SSRF 防护）。"
-        "data 为 dict 时自动 JSON 编码，str 原样发送。10s 超时。"
+        "data 传 JSON 字符串（如 '{\"a\":1}'）自动 JSON 编码发送，普通字符串原样发送。默认 10s 超时，可用 timeout 调整。"
     )
     parameters: dict = field(
         default_factory=lambda: {
@@ -613,9 +656,10 @@ class HttpPostTool(FunctionTool):
                 "url": {"type": "string", "description": "请求 URL"},
                 "data": {
                     "type": "string",
-                    "description": "POST body，dict 自动 JSON 编码，str 原样发送",
+                    "description": "POST body。JSON 字符串自动编码为 application/json 发送，其他字符串原样发送",
                 },
                 "headers": {"type": "object", "description": "自定义请求头，可选"},
+                "timeout": {"type": "integer", "description": "超时秒数，默认 10", "default": 10},
             },
             "required": ["url"],
         }
@@ -627,6 +671,7 @@ class HttpPostTool(FunctionTool):
         url: str,
         data: str = "",
         headers: dict = None,
+        timeout: int = 10,
         **kwargs,
     ) -> ToolExecResult:
         _tool_stats.record(self.name)
@@ -645,7 +690,8 @@ class HttpPostTool(FunctionTool):
             if json_failed and isinstance(data, str) and data.strip():
                 if data.strip()[0] in ("{", "["):
                     return _err("data 看起来是 JSON 但解析失败——请检查 JSON 语法后重试")
-            result = await _run_sync(_http_post, url, body if body else None, headers)
+            timeout = min(max(1, int(timeout)), 600)
+            result = await _run_sync(_http_post, url, body if body else None, headers, timeout)
             return _unwrap(result)
         except Exception as e:
             return _err(f"http_post 失败: {e}")
@@ -658,7 +704,7 @@ HttpDownloadTool = make_tool(
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "下载地址"},
-                "path": {"type": "string", "description": "保存路径（含文件名）"},
+                "path": {"type": "string", "description": "保存文件名（仅文件名生效，目录部分会被忽略；文件实际保存到沙箱目录 ~/.irmia/downloads/，返回结果含真实路径）"},
                 "overwrite": {
                     "type": "boolean",
                     "description": "是否覆盖已有文件，默认 false",
@@ -933,6 +979,8 @@ class TimeTool(FunctionTool):
             elif action == "convert":
                 if value:
                     return _unwrap(await _run_sync(iso_to_ts, value))
+                if not ts:
+                    return _err("convert 需要 value（ISO 字符串转时间戳）或 ts（时间戳转 ISO）之一")
                 return _unwrap(await _run_sync(ts_to_iso, ts, ms))
             elif action == "diff":
                 return _unwrap(await _run_sync(time_diff, iso1, iso2))
@@ -944,7 +992,7 @@ class TimeTool(FunctionTool):
 
 DirListTool = make_tool(
     "dir_list",
-    "【优于 dir——首选】目录列表，返回结构化条目（name/size/type/date）。比 shell dir 快 10 倍，比 Python os.listdir 少 100 行样板代码。支持 pattern 通配/max_depth/show_hidden，目录优先排序，上限 200。",
+    "【优于 dir——首选】目录列表，返回结构化条目（name/path/type/size/mtime）。比 shell dir 快 10 倍，比 Python os.listdir 少 100 行样板代码。支持 pattern 通配/max_depth/show_hidden，目录优先排序，上限 200。",
     {
             "type": "object",
             "properties": {
@@ -1198,29 +1246,14 @@ FileReadTool = make_tool(
                     "description": "hex 模式下最多读取的字节数",
                     "default": 0,
                 },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "已弃用：目录读取已移除，请使用 dir_list / dir_tree",
-                    "default": 3,
-                },
-                "max_entries": {
-                    "type": "integer",
-                    "description": "已弃用：目录读取已移除，请使用 dir_list / dir_tree",
-                    "default": 50,
-                },
-                "include_hidden": {
+                "line_numbers": {
                     "type": "boolean",
-                    "description": "已弃用：目录读取已移除，请使用 dir_list / dir_tree",
-                    "default": False,
+                    "description": "文本内容是否带行号前缀（格式 '  123│ 内容'），默认 true。false 返回纯文本",
+                    "default": True,
                 },
                 "include_metadata": {
                     "type": "boolean",
-                    "description": "是否返回文件/目录元信息",
-                    "default": True,
-                },
-                "recursive": {
-                    "type": "boolean",
-                    "description": "目录递归读取（已弃用：目录读取已移除，请使用 dir_list / dir_tree）",
+                    "description": "是否返回文件元信息（mtime/ctime/permissions 等），默认 false。仅在需要文件时间/权限信息时开启",
                     "default": False,
                 },
             },
@@ -1486,7 +1519,8 @@ class GhRepoTool(FunctionTool):
     description: str = (
         "【替代 gh CLI——首选】GitHub 仓库与 CI 管理。"
         "比原生 gh 多一层结构化 JSON 输出。"
-        "action: create/view/runs/auth。create 需 title(仓库名)。"
+        "action: create/view/runs/run_view/run_logs/auth。create 需 title(仓库名)；"
+        "run_view/run_logs 需 run_id（CI 失败时用 run_logs 取日志尾部自诊断）。"
     )
     parameters: dict = field(
         default_factory=lambda: {
@@ -1494,8 +1528,8 @@ class GhRepoTool(FunctionTool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "操作: create / view / runs / auth",
-                    "enum": ["create", "view", "runs", "auth"],
+                    "description": "操作: create / view / runs / run_view / run_logs / auth",
+                    "enum": ["create", "view", "runs", "run_view", "run_logs", "auth"],
                 },
                 "cwd": {"type": "string", "description": "仓库路径，默认当前工作目录"},
                 "title": {"type": "string", "description": "仓库名（create 时必填）"},
@@ -1505,6 +1539,7 @@ class GhRepoTool(FunctionTool):
                 },
                 "public": {"type": "boolean", "description": "create 时是否公开仓库"},
                 "limit": {"type": "integer", "description": "runs 时返回数量上限"},
+                "run_id": {"type": "integer", "description": "workflow run ID（run_view/run_logs 时必填，从 runs 结果获取）"},
             },
             "required": ["action"],
         }
@@ -1519,6 +1554,7 @@ class GhRepoTool(FunctionTool):
         owner_repo: str = "",
         public: bool = False,
         limit: int = 5,
+        run_id: int = 0,
         **kwargs,
     ) -> ToolExecResult:
         _tool_stats.record(self.name)
@@ -1534,6 +1570,14 @@ class GhRepoTool(FunctionTool):
                     result = await _run_sync(_gh_repo_view, cwd or "", owner_repo)
                 case "runs":
                     result = await _run_sync(_gh_run_list, cwd or "", limit)
+                case "run_view":
+                    if not run_id:
+                        return _err("gh_repo run_view 需要 run_id 参数（从 action=runs 结果获取）")
+                    result = await _run_sync(_gh_run_view, run_id, cwd or ".")
+                case "run_logs":
+                    if not run_id:
+                        return _err("gh_repo run_logs 需要 run_id 参数（从 action=runs 结果获取）")
+                    result = await _run_sync(_gh_run_logs, run_id, cwd or ".")
                 case "auth":
                     result = await _run_sync(_gh_auth_status)
                 case _:
@@ -1602,7 +1646,7 @@ ProjectInitTool = make_tool(
 
 GitChangelogTool = make_tool(
     "git_changelog",
-    "从 git log 生成分类 changelog：按 fix:/feat:/refactor:/docs: 前缀分组，返回结构化 counts。",
+    "从 git log 生成分类 changelog：按 feat:/fix:/perf:/refactor:/docs:/test:/chore:/build:/ci: 前缀分组，返回结构化 counts。",
     {
             "type": "object",
             "properties": {
@@ -1644,7 +1688,7 @@ TestRunnerTool = make_tool(
     {
             "type": "object",
             "properties": {
-                "filepath": {"type": "string", "description": "相关文件路径，可选"},
+                "filepath": {"type": "string", "description": "相关文件路径（仅用于定位项目根目录，不会只跑该文件的测试），可选"},
                 "project_dir": {
                     "type": "string",
                     "description": "项目根目录，默认当前目录",
@@ -1788,8 +1832,7 @@ DbQueryTool = make_tool(
                 "sql": {"type": "string", "description": "SELECT 或 PRAGMA 查询语句"},
                 "params": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": '查询参数列表，如 [42, "active"]',
+                    "description": '查询参数列表，元素可为任意 JSON 类型，如 [42, "active"]',
                 },
             },
             "required": ["db_path", "sql"],

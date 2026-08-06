@@ -525,6 +525,84 @@ class TestBfsPath:
             cg.close()
 
 
+class TestEnsureDbSkip:
+    """_ensure_db 幂等跳过：同一 db_path 二次初始化跳过 DDL，仅做每连接 PRAGMA。"""
+
+    def test_second_init_skips_ddl(self, tmp_path):
+        from tools import codegraph
+
+        db = str(tmp_path / "skip.db")
+        key = os.path.abspath(db)
+        codegraph._ENSURED.discard(key)
+        # 通过 __dict__ 取底层函数，恢复时重新包 staticmethod，避免变成实例方法
+        original = CodeGraph.__dict__["_create_schema"].__func__
+        calls = []
+
+        def spy(conn):
+            calls.append(1)
+            return original(conn)
+
+        try:
+            cg1 = CodeGraph(db)
+            cg1.close()
+            assert key in codegraph._ENSURED
+            assert len(calls) == 0  # spy 尚未挂载
+
+            CodeGraph._create_schema = staticmethod(spy)
+            try:
+                cg2 = CodeGraph(db)
+            finally:
+                CodeGraph._create_schema = staticmethod(original)
+            assert calls == []  # 二次初始化未触发 DDL
+            try:
+                # 连接可用，表结构仍在
+                conn = cg2._conn_get()
+                conn.execute("INSERT INTO meta(key,value) VALUES('k','v')")
+                conn.commit()
+                assert conn.execute("SELECT value FROM meta WHERE key='k'").fetchone()[0] == "v"
+            finally:
+                cg2.close()
+        finally:
+            codegraph._ENSURED.discard(key)
+
+
+class TestRelatedLocations:
+    """R3：引用位置字段（纯增量，旧字段不变）。"""
+
+    def test_related_symbols_include_locations(self, test_db):
+        cg = CodeGraph(test_db)
+        try:
+            r = cg.explore("helper 在哪")
+            assert r["found"] is True
+            related = r["related_symbols"]
+            # 旧字段保持
+            assert "main" in related["callers"]
+            # 新增位置字段
+            assert "caller_locations" in related
+            assert "callee_locations" in related
+            locs = related["caller_locations"]
+            assert len(locs) <= 50
+            main_locs = [l for l in locs if l["name"] == "main"]
+            assert main_locs
+            assert main_locs[0]["file"]
+            assert isinstance(main_locs[0]["line"], int)
+        finally:
+            cg.close()
+
+    def test_trace_open_include_locations(self, test_db):
+        cg = CodeGraph(test_db)
+        try:
+            r = cg.explore("helper 调用链")
+            assert r["found"] is True
+            assert "caller_locations" in r
+            assert "callee_locations" in r
+            assert isinstance(r["caller_locations"], list)
+            # 旧字段保持
+            assert "callers" in r and "callees" in r
+        finally:
+            cg.close()
+
+
 class TestFtsIncrementalConsistency:
     """回归测试：FTS 与 symbols 的一致性维护。
 

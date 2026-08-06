@@ -84,3 +84,42 @@ class TestConfigDiff:
         assert "removed_key" in r["removed"]
         assert "added_key" in r["added"]
         assert "changed_key" in r["changed"]
+
+    def test_large_value_truncated(self, tmp_dir):
+        """P12: value 序列化后超过 500 字符时截断。"""
+        a = Path(tmp_dir) / "a.json"
+        b = Path(tmp_dir) / "b.json"
+        big_value = "v" * 1000
+        a.write_text(json.dumps({"big": big_value, "small": 1}))
+        b.write_text(json.dumps({"big": "short", "small": 1}))
+        r = diff(str(a), str(b))
+        assert r["ok"] is True
+        old = r["changed"]["big"]["old"]
+        assert isinstance(old, str)
+        assert old.startswith("<截断: ")
+        assert old.endswith("...>")
+        assert len(old) <= 500 + 16  # "<截断: " + 500 + "...>"
+        assert r["changed"]["big"]["new"] == "short"
+        # 未变化的小值不受影响
+        assert r["unchanged"] == 1
+
+    def test_added_large_value_truncated(self, tmp_dir):
+        a = Path(tmp_dir) / "a.json"
+        b = Path(tmp_dir) / "b.json"
+        a.write_text(json.dumps({}))
+        b.write_text(json.dumps({"new_big": list(range(500))}))
+        r = diff(str(a), str(b))
+        assert r["ok"] is True
+        assert r["added"]["new_big"].startswith("<截断: ")
+
+    def test_file_over_10mb_rejected(self, tmp_dir):
+        """P12: 单文件超过 10MB 返回结构化错误。"""
+        a = Path(tmp_dir) / "a.json"
+        b = Path(tmp_dir) / "b.json"
+        # 10MB+ 的有效 JSON（单 key 大字符串）
+        a.write_text(json.dumps({"pad": "x" * (10 * 1024 * 1024)}))
+        b.write_text(json.dumps({"pad": "y"}))
+        r = diff(str(a), str(b))
+        assert r["ok"] is False
+        assert "10MB" in r["error"]
+        assert r["max_size"] == 10 * 1024 * 1024

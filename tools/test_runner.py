@@ -6,12 +6,25 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from .shell_exec import split_command, validate_command
+
+
+def _resolve_exe(args: list[str]) -> list[str]:
+    """Windows 上 npx/npm 是 .cmd 脚本，shell=False 按名调用会 FileNotFoundError；
+    用 shutil.which 解析全路径。解析失败保留原命令名，交由 _run 的
+    FileNotFoundError 降级逻辑处理。"""
+    if not args:
+        return args
+    resolved = shutil.which(args[0])
+    if resolved:
+        return [resolved] + args[1:]
+    return args
 
 
 
@@ -38,12 +51,12 @@ def discover(project_dir: Path) -> tuple[str, list[str]]:
             deps.update(data.get("dependencies", {}) if isinstance(data, dict) else {})
             deps.update(data.get("devDependencies", {}) if isinstance(data, dict) else {})
             if "jest" in deps or "jest" in str(scripts.get("test", "")):
-                return "jest", ["npx", "jest", "--json"]
+                return "jest", _resolve_exe(["npx", "jest", "--json"])
             if "test" in scripts:
-                return "npm", ["npm", "test"]
+                return "npm", _resolve_exe(["npm", "test"])
         except Exception:
             pass
-        return "jest", ["npx", "jest", "--json"]
+        return "jest", _resolve_exe(["npx", "jest", "--json"])
     return "pytest", [sys.executable, "-m", "pytest", "-q", "--tb=short"]
 
 
@@ -57,7 +70,7 @@ def _run(args: list[str], cwd: Path, timeout: int) -> tuple[int, str, str, float
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=max(1, int(timeout)),
+            timeout=min(max(1, int(timeout)), 600),
             shell=False,
         )
         return proc.returncode, proc.stdout or "", proc.stderr or "", time.monotonic() - start, False

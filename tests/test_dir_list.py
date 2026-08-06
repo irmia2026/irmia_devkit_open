@@ -1,5 +1,6 @@
 """Tests for dir_list."""
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -96,4 +97,18 @@ class TestListDir:
             pytest.skip("symlink not supported")
         r = dl.list_dir(tmp_dir, max_depth=3)
         assert r["ok"] is True
+
+    def test_entries_have_mtime(self, tmp_dir):
+        """S3: 文件和目录 entry 都带 ISO 格式 mtime。"""
+        root = Path(tmp_dir)
+        (root / "a.py").write_text("a", encoding="utf-8")
+        (root / "sub").mkdir()
+
+        r = dl.list_dir(tmp_dir)
+        assert r["ok"] is True
+        by_name = {e["name"]: e for e in r["entries"]}
+        for name in ("a.py", "sub"):
+            assert "mtime" in by_name[name]
+            # ISO 格式可被 fromisoformat 解析
+            datetime.fromisoformat(by_name[name]["mtime"])
 

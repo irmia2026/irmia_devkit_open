@@ -18,7 +18,7 @@ class TestFileReadBasic:
         
         assert result["ok"] is True
         assert result["encoding"] in ("utf-8", "ascii")  # ascii 是 utf-8 的子集
-        assert result["content"] == "hello world\nline 2\nline 3"
+        assert result["content"] == "     1│ hello world\n     2│ line 2\n     3│ line 3"
         assert result["total_lines"] == 3
         assert result["has_more"] is False
     
@@ -52,7 +52,7 @@ class TestFileReadPagination:
         assert result["start_line"] == 10
         assert result["end_line"] == 20
         assert result["returned_lines"] == 11
-        assert result["content"].startswith("line 10")
+        assert result["content"].startswith("    10│ line 10")
         assert result["content"].endswith("line 20")
     
     def test_head_mode(self, tmp_dir):
@@ -90,6 +90,57 @@ class TestFileReadPagination:
         assert result["returned_lines"] == 50
         assert result["has_more"] is True or result["truncated"] is True  # 大文件可能触发截断
         assert result["truncated"] is True
+
+
+class TestFileReadLineNumbers:
+    """B8: 文本读取默认带行号前缀，line_numbers=False 保持旧行为。"""
+
+    def test_range_mode_line_numbers_default(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 21)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), start_line=5, end_line=7)
+
+        assert result["ok"] is True
+        assert result["content"] == "     5│ line 5\n     6│ line 6\n     7│ line 7"
+
+    def test_line_numbers_disabled_keeps_old_behavior(self, tmp_dir):
+        f = Path(tmp_dir) / "plain.txt"
+        f.write_text("hello world\nline 2\nline 3\n", encoding="utf-8")
+
+        result = safe_read.read(str(f), line_numbers=False)
+
+        assert result["ok"] is True
+        assert result["content"] == "hello world\nline 2\nline 3"
+
+    def test_head_mode_line_numbers(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 11)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), head=3)
+
+        assert result["ok"] is True
+        assert result["content"].startswith("     1│ line 1")
+        assert "     3│ line 3" in result["content"]
+
+    def test_tail_mode_line_numbers_use_real_lineno(self, tmp_dir):
+        f = Path(tmp_dir) / "lines.txt"
+        f.write_text("\n".join([f"line {i}" for i in range(1, 101)]), encoding="utf-8")
+
+        result = safe_read.read(str(f), tail=2)
+
+        assert result["ok"] is True
+        assert "    99│ line 99" in result["content"]
+        assert "   100│ line 100" in result["content"]
+
+    def test_include_metadata_default_false(self, tmp_dir):
+        f = Path(tmp_dir) / "a.txt"
+        f.write_text("x", encoding="utf-8")
+
+        result = safe_read.read(str(f))
+
+        assert result["ok"] is True
+        assert result["metadata"] == {}
 
 
 class TestFileReadNavigation:
@@ -286,7 +337,7 @@ class TestFileReadMetadata:
         f = Path(tmp_dir) / "test.txt"
         f.write_text("hello world", encoding="utf-8")
         
-        result = safe_read.read(str(f))
+        result = safe_read.read(str(f), include_metadata=True)
         
         assert result["ok"] is True
         assert "metadata" in result
@@ -299,7 +350,7 @@ class TestFileReadMetadata:
         f = Path(tmp_dir) / "test.txt"
         f.write_text("x" * 2048, encoding="utf-8")
         
-        result = safe_read.read(str(f))
+        result = safe_read.read(str(f), include_metadata=True)
         
         assert result["ok"] is True
         assert result["human_size"] in ("2.0KB", "2KB")
@@ -365,7 +416,7 @@ class TestFileReadEncoding:
         """超长单行文件应被字节上限截断。"""
         f = Path(tmp_dir) / "longline.txt"
         # 每行 1000 个 'x'，200 行 = 200KB+，超过 MAX_RETURN_BYTES=128KB
-        f.write_text("\n".join(f"line {i}: {"x" * 1000}" for i in range(200)), encoding="utf-8")
+        f.write_text("\n".join(f"line {i}: {'x' * 1000}" for i in range(200)), encoding="utf-8")
         
         result = safe_read.read(str(f), max_lines=200)
         

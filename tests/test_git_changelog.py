@@ -36,3 +36,14 @@ class TestGitChangelog:
         r = changelog(cwd=git_repo, count=1)
         assert r["ok"] is True
         assert r["total"] == 1
+
+    def test_extended_categories(self, git_repo: str) -> None:
+        """九类分类 + other 兜底；fixture 中的 chore commit 应归入 chore。"""
+        r = changelog(cwd=git_repo, count=30)
+        assert r["ok"] is True
+        for key in ("features", "fixes", "perf", "refactors", "docs",
+                    "tests", "chore", "build", "ci", "other"):
+            assert key in r["categories"]
+        assert len(r["categories"]["chore"]) == 1
+        assert "bump version" in r["categories"]["chore"][0]
+        assert r["counts"]["chore"] == 1

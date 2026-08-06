@@ -48,7 +48,7 @@ Python ≥ 3.10
 
 `syntax_check`/`lint_runner`/`rg_search` 在返回结果中附带代码上下文片段，帮助 LLM 直接定位问题，无需额外读文件。
 
-64 个工具按 10 组管理，可在 `config.json` 中按组或按单个工具关闭。
+65 个工具按 10 组管理，可在 `config.json` 中按组或按单个工具关闭。
 
 ## 架构
 
@@ -59,17 +59,17 @@ Python ≥ 3.10
 - 安全设计架构（SSRF 四层、safe_edit 防御链、ReDoS 三重盾）
 - 异步执行模型和测试策略
 
-## 工具列表 (64)
+## 工具列表 (65)
 
 ### 🔒 安全编辑链 (10)
 
 | 工具 | 用途 |
 |------|------|
-| `safe_edit` | 备份→替换→语法检查→通过保留/失败回滚 |
+| `safe_edit` | 备份→替换→语法检查→通过保留/失败回滚；支持行号插入/删行模式 |
 | `safe_write` | 新建文件/整体覆盖写入，自动创建父目录，语法检查 |
 | `safe_rollback` | 回滚到指定或最近备份 |
-| `safe_backups` | 列出备份文件 |
-| `file_patch` | 精确文本替换，非代码文件用 |
+| `safe_backups` | 列出备份文件（自动保留策略：每文件 10 份 + 500MB LRU） |
+| `file_patch` | 精确文本替换，非代码文件用，支持 occurrence 消歧 |
 | `file_preview` | 预览替换效果 (dry-run diff) |
 | `syntax_check` | Python / Nim / Go / JS / TS 语法 |
 | `lint_runner` | ruff / pylint / eslint 代码质量 |
@@ -83,20 +83,20 @@ Python ≥ 3.10
 | `git_status` | 仓库状态 (--porcelain) |
 | `git_diff` | 工作区/暂存区差异 |
 | `git_log` | 最近 N 条提交 |
-| `git_commit` | 暂存并提交（>10 文件拦截） |
+| `git_commit` | 暂存并提交（>10 文件拦截；files 选择性暂存 / force 强制） |
 | `git_branch` | 当前分支 |
 | `git_remote` | 远程 URL |
 | `git_push` | 推送（无 --force） |
 | `gh_pr` | PR：创建/列出/合并/查看 |
 | `gh_issue` | Issue：创建/列出/关闭 |
 | `gh_release` | Release：创建/列出 |
-| `gh_repo` | 仓库：创建/查看/CI/认证 |
+| `gh_repo` | 仓库：创建/查看/CI 状态/CI 日志/认证 |
 
 ### 📁 文件系统 (12)
 
 | 工具 | 用途 |
 |------|------|
-| `safe_read` | 增强版安全文件读取：编码自动检测、二进制/hex、head/tail、行号范围、目录读取、代码骨架 |
+| `safe_read` | 增强版安全文件读取：编码自动检测、行号前缀、二进制/hex、head/tail、行号范围、代码骨架 |
 | `es_search` | Everything/locate/fd 文件名搜索 |
 | `rg_search` | 文件内容搜索（ripgrep + Python fallback） |
 | `dir_tree` | 目录树 |
@@ -113,7 +113,7 @@ Python ≥ 3.10
 
 | 工具 | 用途 |
 |------|------|
-| `port_check` | 端口检测 / 批量扫描 |
+| `port_check` | 端口检测（含延迟）/ 批量扫描 |
 | `proc_list` | 进程列表 |
 | `sys_snapshot` | 系统快照 (CPU/内存/进程/开机) |
 | `tool_stats` | 工具调用统计 |
@@ -129,7 +129,7 @@ Python ≥ 3.10
 
 | 工具 | 用途 |
 |------|------|
-| `http_get` | HTTP GET + HTML→Markdown 正文提取 (SSRF 防护) |
+| `http_get` | HTTP GET + HTML→Markdown 正文提取 (SSRF 防护，默认 markdown 分页) |
 | `http_post` | HTTP POST |
 | `http_download` | 二进制下载 (500MB 上限 + 路径沙箱) |
 
@@ -160,8 +160,8 @@ Python ≥ 3.10
 | `semver_compare` | 语义版本比较 |
 | `uuid_gen` | UUID / hex / token |
 | `project_init` | 项目结构扫描 |
-| `git_changelog` | git log 分类 |
-| `db_query` | SQLite 只读查询 |
+| `git_changelog` | git log 九类前缀分类 |
+| `db_query` | SQLite 只读查询（200 行截断保护） |
 | `dep_scan` | Python 依赖图 + 循环检测 |
 
 ### 🤖 代码理解 (6)
@@ -205,7 +205,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-209 用例；当前本地验证为 209 passed、8 skipped。覆盖 SSRF、safe_edit 防御链、Zip-slip、SQL 注入、ReDoS、注册表一致性、linter/test fallback、权限鉴权、语义索引、原子编辑、安全命令执行和审计日志等。
+209 用例起步；当前本地验证为 661 passed、8 skipped。覆盖 SSRF、safe_edit 防御链、Zip-slip、SQL 注入、ReDoS、注册表一致性、linter/test fallback、权限鉴权、语义索引、原子编辑、安全命令执行和审计日志等。
 
 ## 英文文档
 
@@ -213,7 +213,7 @@ python -m pytest tests/ -v
 
 ## 版本
 
-2.6.3 · [Changelog](CHANGELOG.md)
+2.6.4 · [Changelog](CHANGELOG.md)
 
 ## 作者
 

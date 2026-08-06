@@ -4,6 +4,7 @@ project_init — 项目结构扫描与上下文生成。
 """
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -39,6 +40,10 @@ def scan(project_dir: str = ".") -> dict:
     return {"ok": True, "context": context}
 
 
+# 语言探测遍历时剪枝的目录
+_PRUNE_DIRS = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__"}
+
+
 def _detect_language(root: Path, ctx: dict):
     detectors = [
         (".py", "python"),
@@ -53,15 +58,22 @@ def _detect_language(root: Path, ctx: dict):
     ]
     scored = {}
     count = 0
-    for f in root.rglob("*"):
-        if f.is_file():
+    stop = False
+    for _dirpath, dirnames, filenames in os.walk(root):
+        # 原地修改 dirnames 实现目录剪枝
+        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+        for name in filenames:
             count += 1
             if count > 2000:
+                stop = True
                 break
+            suffix = Path(name).suffix.lower()
             for ext, lang in detectors:
-                if f.suffix.lower() == ext:
+                if suffix == ext:
                     scored[lang] = scored.get(lang, 0) + 1
                     break
+        if stop:
+            break
     if scored:
         ctx["language"] = max(scored, key=scored.get)  # type: ignore
 

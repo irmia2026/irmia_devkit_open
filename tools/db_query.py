@@ -33,13 +33,14 @@ def query(db_path: str, sql: str, params: list = None) -> dict:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(sql, params)
             columns = [d[0] for d in cur.description] if cur.description else []
-            rows = [dict(r) for r in cur.fetchall()]
+            # 多取 1 行用于判断是否截断，避免全量 fetchall 拉爆内存
+            fetched = [dict(r) for r in cur.fetchmany(201)]
         return {
             "ok": True,
             "columns": columns,
-            "rows": rows[:200],
-            "count": len(rows),
-            "truncated": len(rows) > 200,
+            "rows": fetched[:200],
+            "count": len(fetched[:200]),
+            "truncated": len(fetched) > 200,
         }
     except sqlite3.Error as e:
         return proposal_reply(

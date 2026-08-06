@@ -39,11 +39,13 @@ class TestDepScan:
         """A file with syntax error should be skipped."""
         p = Path(tmp_dir)
         (p / "broken.py").write_text("this is not valid python @@")
-        (p / "good.py").write_text("import os\n")
+        (p / "helper.py").write_text("def h(): return 1\n")
+        (p / "good.py").write_text("import helper\n")
         r = scan(str(p))
         assert r["ok"] is True
-        # good.py has an import, broken.py skipped due to SyntaxError
+        # good.py 有项目内依赖；broken.py 因 SyntaxError 跳过
         assert r["files_scanned"] == 1
+        assert r["dependencies"] == {"good": ["helper"]}
 
     def test_cycle_detection(self, tmp_dir):
         """Create two files that import each other."""
@@ -52,6 +54,34 @@ class TestDepScan:
         (p / "b.py").write_text("from a import foo\ndef bar(): pass\n")
         r = scan(str(p))
         assert r["ok"] is True
-        # Note: cycle detection uses filename keys vs module name deps,
-        # so actual detection depends on matching. Just verify no crash.
-        assert "has_cycles" in r
+        # 图的键为项目内模块名（a/b），依赖只保留项目内模块，循环可被检出
+        assert r["has_cycles"] is True
+        cycle_modules = {m for c in r["cycles"] for m in c}
+        assert {"a", "b"} <= cycle_modules
+
+    def test_excluded_dirs_skipped(self, tmp_dir):
+        """node_modules/.venv/__pycache__ 等目录不参与扫描。"""
+        p = Path(tmp_dir)
+        (p / "main.py").write_text("import os\n")
+        for d in ("__pycache__", ".git", ".venv", "venv", "node_modules",
+                  ".tox", "dist", "build", ".mypy_cache", ".pytest_cache"):
+            sub = p / d
+            sub.mkdir()
+            (sub / "junk.py").write_text("import main\n")
+        r = scan(str(p))
+        assert r["ok"] is True
+        # 排除目录里的 junk.py 不应出现在依赖图中
+        assert all("junk" not in k for k in r["dependencies"])
+
+    def test_package_module_names(self, tmp_dir):
+        """包内模块以点分模块名为键，__init__.py 映射为包名。"""
+        p = Path(tmp_dir)
+        pkg = p / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("from pkg import core\n")
+        (pkg / "core.py").write_text("import pkg\n")
+        r = scan(str(p))
+        assert r["ok"] is True
+        assert "pkg" in r["dependencies"]
+        assert "pkg.core" in r["dependencies"]
+        assert r["has_cycles"] is True

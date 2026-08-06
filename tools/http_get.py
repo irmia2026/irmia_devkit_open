@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import threading
+import time
 
 import re
 import urllib.request
@@ -21,6 +22,7 @@ _MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5MB：超过此大小截断
 _MAX_RESPONSE_BODY = 5000  # format=html 返回给 LLM 的最大字符数
 _MAX_CONTENT_LENGTH = 8000  # format=markdown/text 每页最大字符数
 _PAGE_CACHE_SIZE = 10  # 最多缓存的页面数（LRU 淘汰）
+_PAGE_CACHE_TTL = 300  # 页面缓存有效期（秒），过期重新请求
 _DEFAULT_TIMEOUT = 15  # 默认超时秒数
 
 # ── 翻页缓存：key=(url, format, extract) → 完整转换结果 ──
@@ -33,16 +35,21 @@ def _cache_key(url: str, format: str, extract: bool) -> tuple:
 
 
 def _get_cached(key: tuple) -> dict | None:
-    """命中缓存时返回并移到末尾（LRU）；未命中返回 None。"""
+    """命中缓存且未过期时返回并移到末尾（LRU）；未命中或过期返回 None。"""
     with _page_cache_lock:
         if key in _page_cache:
+            entry = _page_cache[key]
+            if time.monotonic() - entry.get("_cached_at", 0.0) > _PAGE_CACHE_TTL:
+                del _page_cache[key]
+                return None
             _page_cache.move_to_end(key)
-            return _page_cache[key]
+            return entry
     return None
 
 
 def _set_cache(key: tuple, entry: dict) -> None:
     """写入缓存，超过上限踢最旧的。"""
+    entry["_cached_at"] = time.monotonic()
     with _page_cache_lock:
         if key in _page_cache:
             _page_cache.move_to_end(key)
@@ -102,11 +109,12 @@ def _extract_metadata(html: str) -> dict:
     return {"title": title, "description": description}
 
 
-def _convert_html(html: str, format: str, extract: bool) -> str:
-    """将 HTML 转换为 markdown 或 text。
+def _convert_html(html: str, format: str, extract: bool) -> tuple[str, str]:
+    """将 HTML 转换为 markdown 或 text，返回 (内容, 实际使用的转换器)。
 
     降级链：trafilatura → markdownify → BeautifulSoup → html截断。
     extract=True 先走 trafilatura 正文提取，False 直接从 markdownify 开始。
+    转换器取值：trafilatura / markdownify / bs4。
     """
 
     def _markdown_convert(h):
@@ -152,12 +160,14 @@ def _convert_html(html: str, format: str, extract: bool) -> str:
                 include_tables=True,
             )
             if extracted and len(extracted.strip()) > 50:
-                return extracted.strip()
+                return extracted.strip(), "trafilatura"
         except Exception:
             pass
-        return _markdown_convert(html) or _bs4_plain(html)
 
-    return _markdown_convert(html) or _bs4_plain(html)
+    text = _markdown_convert(html)
+    if text:
+        return text, "markdownify"
+    return _bs4_plain(html), "bs4"
 
 
 def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) -> dict:
@@ -195,6 +205,7 @@ def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) ->
         "content_length": len(page),
         "format": format,
         "extracted": extract,
+        "converter": entry.get("converter", "none"),
         "offset": offset,
         "has_more": has_more,
         "next_call": next_call,
@@ -213,7 +224,7 @@ def _add_ua(req, headers: dict | None):
 def get(
     url: str,
     headers: dict | None = None,
-    format: str = "html",
+    format: str = "markdown",
     extract: bool = False,
     timeout: int = _DEFAULT_TIMEOUT,
     offset: int = 0,
@@ -223,15 +234,15 @@ def get(
     Args:
         url: 目标 URL
         headers: 自定义请求头（可选）
-        format: 输出格式 — "html" | "markdown" | "text"，默认 "html"
+        format: 输出格式 — "html" | "markdown" | "text"，默认 "markdown"
         extract: True=先提取正文再转换（去广告/导航/页脚），False=全页转换，默认 False
         timeout: 超时秒数，默认 15
         offset: 分页偏移量（字符数），0=从头读取。首次调用不传，后续通过 next_call 透传
 
     Returns:
-        format="html" 时返回 {"ok", "status", "body", "truncated", "size"}
+        format="html" 时返回 {"ok", "status", "body", "truncated", "size", "converter"}
         format≠"html" 时返回 {"ok", "status", "url", "title", "description",
-                         "content", "content_length", "format", "extracted",
+                         "content", "content_length", "format", "extracted", "converter",
                          "offset", "has_more", "next_call", "options", "truncated", "size"}
     """
     err = check_url(url)
@@ -255,10 +266,13 @@ def get(
                 return raw
 
             if format == "html":
-                # 向后兼容：默认行为不变，5000 字符截断
+                # 向后兼容：5000 字符截断，无分页
                 was_body_truncated = len(raw["body"]) > _MAX_RESPONSE_BODY
                 raw["body"] = raw["body"][:_MAX_RESPONSE_BODY]
                 raw["truncated"] = raw["truncated"] or was_body_truncated
+                raw["converter"] = "none"
+                if raw["truncated"]:
+                    raw["hint"] = "HTML 已截断且无分页；改用 format='markdown' 或 'text' 可分页读取全文"
                 return raw
 
             # format ∈ {"markdown", "text"}
@@ -269,18 +283,19 @@ def get(
                 cached = _get_cached(key)
                 if cached is not None and offset < len(cached["content"]):
                     return _paginate(cached, offset, url, format, extract)
-                # 缓存未命中或 offset 越界：从头下载
+                # 缓存未命中、已过期或 offset 越界：从头下载
                 offset = 0
 
             # 首次请求：下载 + 转换 + 缓存
             meta = _extract_metadata(raw["body"])
-            content = _convert_html(raw["body"], format, extract)
+            content, converter = _convert_html(raw["body"], format, extract)
             entry = {
                 "status": raw["status"],
                 "size": raw["size"],
                 "title": meta["title"],
                 "description": meta["description"],
                 "content": content,
+                "converter": converter,
             }
             _set_cache(key, entry)
             return _paginate(entry, offset, url, format, extract)
