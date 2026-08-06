@@ -205,7 +205,7 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-209 用例起步；当前本地验证为 661 passed、8 skipped。覆盖 SSRF、safe_edit 防御链、Zip-slip、SQL 注入、ReDoS、注册表一致性、linter/test fallback、权限鉴权、语义索引、原子编辑、安全命令执行和审计日志等。
+209 用例起步；当前本地验证为 678 passed、8 skipped。覆盖 SSRF、safe_edit 防御链、Zip-slip、SQL 注入、ReDoS、注册表一致性、linter/test fallback、权限鉴权、语义索引、原子编辑、安全命令执行和审计日志等。
 
 ## 英文文档
 
