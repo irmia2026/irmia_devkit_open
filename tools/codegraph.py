@@ -423,14 +423,50 @@ class CodeGraph:
         if qtype == "trace_closed" and match and match.re.groups >= 2:
             return self._trace_path(conn, match.group(1).strip(), match.group(2).strip())
         if qtype == "trace_open":
-            return self._trace_open(conn, query)
-        if qtype == "symbol_search":
+            result = self._trace_open(conn, query)
+        elif qtype == "symbol_search":
             target = query
             for kw in _SEARCH_NOISE:
                 target = target.replace(kw, " ")
             target = re.sub(r"\s+", " ", target).strip()
-            return self._search_symbol(conn, target)
-        return self._explore_fallback(conn, query)
+            result = self._search_symbol(conn, target)
+        else:
+            result = self._explore_fallback(conn, query)
+        # 索引新鲜度：索引后被修改的文件会让返回的行号/位置漂移
+        if isinstance(result, dict) and result.get("ok"):
+            stale = self._staleness(conn, _result_files(result))
+            if stale:
+                result["index_stale"] = True
+                result["stale_warning"] = (
+                    f"{stale} 个文件在索引后被修改，行号/调用位置可能已漂移，"
+                    "建议 code_index(incremental=true) 后重查"
+                )
+        return result
+
+    def _staleness(self, conn, files: list[str], limit: int = 50) -> int:
+        """统计 files 中 mtime 晚于 last_index 的数量（索引过期探测）。"""
+        row = conn.execute("SELECT value FROM meta WHERE key='last_index'").fetchone()
+        if not row:
+            return 0
+        try:
+            last_index = float(row[0])
+        except (TypeError, ValueError):
+            return 0
+        root = Path(self._db_path).resolve().parent.parent
+        stale = 0
+        seen: set[str] = set()
+        for f in files:
+            if not f or f in seen:
+                continue
+            seen.add(f)
+            if len(seen) > limit:
+                break
+            try:
+                if (root / f).resolve().stat().st_mtime > last_index:
+                    stale += 1
+            except OSError:
+                continue
+        return stale
 
     # ── search ────────────────────────────────────────
 
@@ -849,8 +885,17 @@ class CodeGraph:
             if total_lines > _PACK_MAX_LINES:
                 break
 
-        return {"ok": True, "target": target_info, "dependencies": deps, "total_lines": total_lines,
+        result = {"ok": True, "target": target_info, "dependencies": deps, "total_lines": total_lines,
                 "truncated": total_lines > _PACK_MAX_LINES}
+        # 索引新鲜度：打包的源码/行号来自索引，索引后修改的文件内容会漂移
+        stale = self._staleness(conn, [target_info["file"]] + [d["file"] for d in deps])
+        if stale:
+            result["index_stale"] = True
+            result["stale_warning"] = (
+                f"{stale} 个文件在索引后被修改，打包的源码/行号可能已漂移，"
+                "建议 code_index(incremental=true) 后重查"
+            )
+        return result
 
     # ── code_status ───────────────────────────────────
 
@@ -1379,6 +1424,30 @@ def _class_of(qualified_name: str) -> str | None:
         return None
     parts = qualified_name.rsplit(".", 1)
     return parts[0]
+
+def _result_files(result: dict) -> list[str]:
+    """从 explore 结果中收集涉及的文件路径（用于索引过期探测）。"""
+    files: list[str] = []
+
+    def _add(loc):
+        if isinstance(loc, dict):
+            f = loc.get("file")
+            if f:
+                files.append(f)
+
+    for s in result.get("symbols") or []:
+        _add(s)
+    grouped = result.get("grouped_by_file")
+    if isinstance(grouped, dict):
+        files.extend(str(k) for k in grouped.keys())
+    for container in (result, result.get("related_symbols")):
+        if not isinstance(container, dict):
+            continue
+        for key in ("caller_locations", "callee_locations"):
+            for loc in container.get(key) or []:
+                _add(loc)
+    return files
+
 
 def _bfs_path(conn, start: str, end: str, max_depth: int = 6) -> list[str] | None:
     from collections import deque

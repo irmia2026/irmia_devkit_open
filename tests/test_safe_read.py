@@ -143,6 +143,58 @@ class TestFileReadLineNumbers:
         assert result["metadata"] == {}
 
 
+class TestLineNumberAccuracy:
+    """行号准确性：tail 大文件不得用估算值（行号会整体漂移）；估算时必须有标记。"""
+
+    def _skewed_big_file(self, tmp_dir):
+        """头部短行（估算样本区）+ 主体超长行 → 采样估算必然严重失真。"""
+        f = Path(tmp_dir) / "big.log"
+        with f.open("w", encoding="utf-8") as fh:
+            for _ in range(500):
+                fh.write("s\n")
+            for _ in range(3000):
+                fh.write("L" * 400 + "\n")
+        return f  # 真实总行数 3500，>1MB
+
+    def test_tail_large_file_exact_line_numbers(self, tmp_dir):
+        f = self._skewed_big_file(tmp_dir)
+
+        result = safe_read.read(str(f), tail=10)
+
+        assert result["ok"] is True
+        assert result["total_lines"] == 3500
+        assert result["start_line"] == 3491
+        assert result["total_lines_estimated"] is False
+        assert result["content"].split("\n")[0].startswith("  3491│ ")
+
+    def test_head_large_file_marks_estimated(self, tmp_dir):
+        f = self._skewed_big_file(tmp_dir)
+
+        result = safe_read.read(str(f), head=10)
+
+        assert result["ok"] is True
+        assert result["total_lines_estimated"] is True
+        # head 的行号本身是精确的（从第 1 行计）
+        assert result["content"].split("\n")[0].startswith("     1│ ")
+
+    def test_range_large_file_marks_estimated(self, tmp_dir):
+        f = self._skewed_big_file(tmp_dir)
+
+        result = safe_read.read(str(f), start_line=1, max_lines=50)
+
+        assert result["ok"] is True
+        assert result["total_lines_estimated"] is True
+
+    def test_small_file_not_estimated(self, tmp_dir):
+        f = Path(tmp_dir) / "small.txt"
+        f.write_text("a\nb\nc\n", encoding="utf-8")
+
+        for kwargs in ({}, {"head": 2}, {"tail": 2}, {"start_line": 1, "end_line": 2}):
+            result = safe_read.read(str(f), **kwargs)
+            assert result["ok"] is True
+            assert result["total_lines_estimated"] is False
+
+
 class TestFileReadNavigation:
     """safe_read 截断导航字段验证。"""
 

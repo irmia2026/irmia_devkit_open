@@ -636,3 +636,53 @@ class TestFtsIncrementalConsistency:
                     os.unlink(f)
                 except OSError:
                     pass
+
+
+class TestIndexStaleness:
+    """索引过期探测：索引后被修改的文件应触发 index_stale 警告（行号可能漂移）。"""
+
+    def _cg_in_project(self, tmp_project):
+        db_dir = Path(tmp_project) / ".codegraph"
+        db_dir.mkdir(exist_ok=True)
+        cg = CodeGraph(str(db_dir / "codegraph.db"))
+        cg.index(tmp_project)
+        return cg
+
+    def test_explore_flags_stale_file(self, tmp_project):
+        cg = self._cg_in_project(tmp_project)
+        try:
+            # 索引后修改文件（mtime 拨到未来）
+            target = Path(tmp_project) / "utils.py"
+            future = cg._conn_get().execute(
+                "SELECT CAST(value AS REAL) FROM meta WHERE key='last_index'").fetchone()[0] + 100
+            os.utime(target, (future, future))
+
+            r = cg.explore("helper")
+            assert r["ok"] is True
+            assert r.get("index_stale") is True
+            assert "stale_warning" in r
+        finally:
+            cg.close()
+
+    def test_explore_fresh_index_no_flag(self, tmp_project):
+        cg = self._cg_in_project(tmp_project)
+        try:
+            r = cg.explore("helper")
+            assert r["ok"] is True
+            assert "index_stale" not in r
+        finally:
+            cg.close()
+
+    def test_code_pack_flags_stale_file(self, tmp_project):
+        cg = self._cg_in_project(tmp_project)
+        try:
+            target = Path(tmp_project) / "utils.py"
+            future = cg._conn_get().execute(
+                "SELECT CAST(value AS REAL) FROM meta WHERE key='last_index'").fetchone()[0] + 100
+            os.utime(target, (future, future))
+
+            r = cg.code_pack("helper")
+            assert r["ok"] is True
+            assert r.get("index_stale") is True
+        finally:
+            cg.close()

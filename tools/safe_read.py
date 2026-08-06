@@ -301,7 +301,8 @@ def _read_lines_range(
 ) -> tuple[list[str], int, int, int, bool]:
     """读取指定行号范围的内容。
 
-    返回：(lines, actual_start, actual_end, total_lines, has_more)
+    返回：(lines, actual_start, actual_end, total_lines, has_more, estimated)
+    estimated=True 表示 total_lines 为采样估算值（仅大文件且 max_lines 截断时）。
 
     小文件（<=1MB）精确统计 total_lines；大文件在 max_lines 命中后停止扫描，
     total_lines 按已读行数 + has_more 估算，避免全文件遍历。
@@ -312,6 +313,7 @@ def _read_lines_range(
     current_line = 0
     total_lines = 0
     hit_limit = False
+    estimated = False
 
     start = max(1, start_line)
     end = end_line if end_line > 0 else float('inf')
@@ -348,15 +350,16 @@ def _read_lines_range(
     # 用估算补全，避免 _build_next_call_and_options 误判 end>=total
     # 导致 next_call 消失（此时文件可能还有大量未读行）。
     if hit_limit and file_size > _SMALL_FILE_THRESHOLD:
-        estimated = _estimate_line_count(p, file_size, encoding)
-        if estimated > total_lines:
-            total_lines = estimated
+        est = _estimate_line_count(p, file_size, encoding)
+        if est > total_lines:
+            total_lines = est
+            estimated = True
 
     actual_start = start if start <= total_lines or (hit_limit and lines) else 0
     actual_end = actual_start + len(lines) - 1 if lines else 0
     has_more = actual_end < total_lines or hit_limit
 
-    return lines, actual_start, actual_end, total_lines, has_more
+    return lines, actual_start, actual_end, total_lines, has_more, estimated
 
 
 def _read_head(
@@ -369,13 +372,15 @@ def _read_head(
     小文件（<=1MB）精确统计 total_lines；大文件读到 n_lines+1 后即停止，
     total_lines 使用估算值，避免扫描整个大文件。
 
-    返回：(lines, total_lines, has_more)
+    返回：(lines, total_lines, has_more, estimated)
+    estimated=True 表示 total_lines 为采样估算值（仅大文件且截断时）。
     """
     p = Path(path)
     file_size = p.stat().st_size
     lines = []
     total_lines = 0
     has_more = False
+    estimated = False
 
     with p.open("r", encoding=encoding, errors="replace", newline="") as f:
         for line in f:
@@ -389,8 +394,9 @@ def _read_head(
 
     if has_more and file_size > _SMALL_FILE_THRESHOLD:
         total_lines = max(n_lines + 1, _estimate_line_count(p, file_size, encoding))
+        estimated = True
 
-    return lines, total_lines, has_more
+    return lines, total_lines, has_more, estimated
 
 
 def _read_tail(
@@ -444,8 +450,9 @@ def _read_tail(
                 partial = partial[:-1]
             buffer.appendleft(partial.decode(encoding, errors="replace"))
 
-        # 统计总行数：只在文件不大时精确计算，否则估算
-        total_lines = _estimate_line_count(p, size, encoding) if size > _SMALL_FILE_THRESHOLD else _count_lines_exact(p, encoding)
+        # 统计总行数：必须精确——start_line 由 total_lines 推导，
+        # 估算值会导致 tail 显示的行号整体漂移（文件有 10MB 上限，精确统计成本低）
+        total_lines = _count_lines_exact(p, encoding)
 
     lines = list(buffer)
     start_line = max(1, total_lines - len(lines) + 1)
@@ -859,7 +866,7 @@ def read(
     
     # 文本模式
     if head > 0:
-        lines, total_lines, has_more = _read_head(p, detected_encoding, head)
+        lines, total_lines, has_more, estimated = _read_head(p, detected_encoding, head)
         lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
         has_more = has_more or byte_truncated
 
@@ -883,6 +890,7 @@ def read(
             'human_size': metadata.get('human_size', human_size(file_size)),
             'mime_type': mime_type,
             'total_lines': total_lines,
+            'total_lines_estimated': estimated,
             'returned_lines': len(lines),
             'start_line': start_line,
             'end_line': end_line,
@@ -921,6 +929,7 @@ def read(
             'human_size': metadata.get('human_size', human_size(file_size)),
             'mime_type': mime_type,
             'total_lines': total_lines,
+            'total_lines_estimated': False,
             'returned_lines': len(lines),
             'start_line': start_line,
             'end_line': end_line,
@@ -945,7 +954,7 @@ def read(
             options=["检查行号范围"],
         )
 
-    lines, actual_start, actual_end, total_lines, has_more = _read_lines_range(
+    lines, actual_start, actual_end, total_lines, has_more, estimated = _read_lines_range(
         p, detected_encoding, start_line, end_line, max_lines
     )
     lines, byte_truncated = _truncate_content_by_bytes(lines, MAX_RETURN_BYTES)
@@ -992,6 +1001,7 @@ def read(
         'human_size': metadata.get('human_size', human_size(file_size)),
         'mime_type': mime_type,
         'total_lines': total_lines,
+        'total_lines_estimated': estimated,
         'returned_lines': len(lines),
         'start_line': actual_start,
         'end_line': actual_end,
