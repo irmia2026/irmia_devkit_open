@@ -88,7 +88,7 @@ def _get_line_context(p: Path, line_num: int, context_size: int = 2) -> list[str
                     break
                 if i >= start:
                     marker = "→" if i == line_num else " "
-                    ctx.append(f"{marker}{i:>4}: {line.rstrip()[:120]}")
+                    ctx.append(f"{marker}{i:>4}│ {line.rstrip()[:120]}")
         return ctx
     except Exception:
         return None

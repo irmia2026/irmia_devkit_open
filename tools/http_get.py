@@ -183,7 +183,7 @@ def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) ->
         next_offset = offset + len(page)
         next_call = {
             "tool": "http_get",
-            "args": {
+            "params": {
                 "url": url,
                 "format": format,
                 "extract": extract,

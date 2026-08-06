@@ -219,7 +219,7 @@ class TestFileReadNavigation:
         assert result["ok"] is True
         assert result["truncated"] is True
         assert result["next_call"]["tool"] == "safe_read"
-        assert result["next_call"]["args"]["start_line"] == 51
+        assert result["next_call"]["params"]["start_line"] == 51
         assert "Continue reading from line 51" in result["options"]
         assert any("tail=50" in opt for opt in result["options"])
 
@@ -233,7 +233,7 @@ class TestFileReadNavigation:
         assert result["header"]
         assert "lines 1-5 of 100" in result["footer"]
         assert "95 more below" in result["footer"]
-        assert result["next_call"]["args"]["start_line"] == 6
+        assert result["next_call"]["params"]["start_line"] == 6
 
     def test_tail_mode_navigation(self, tmp_dir):
         f = Path(tmp_dir) / "lines.txt"
@@ -245,7 +245,7 @@ class TestFileReadNavigation:
         assert result["header"]
         assert "lines 96-100 of 100" in result["footer"]
         assert "95 more above" in result["footer"]
-        assert result["next_call"]["args"]["end_line"] == 95
+        assert result["next_call"]["params"]["end_line"] == 95
 
     def test_no_footer_when_complete_file(self, tmp_dir):
         f = Path(tmp_dir) / "small.txt"
@@ -322,7 +322,7 @@ class TestFileReadDirectory:
         assert "dir_list" in result["options"]
         assert "dir_tree" in result["options"]
         assert result["next_call"]["tool"] == "dir_list"
-        assert Path(result["next_call"]["args"]["path"]).resolve() == d.resolve()
+        assert Path(result["next_call"]["params"]["path"]).resolve() == d.resolve()
 
     def test_read_directory_with_metadata(self, tmp_dir):
         d = Path(tmp_dir) / "testdir"
@@ -531,7 +531,7 @@ class TestFileReadProposal:
         assert "proposal" in result
         assert "next_call" in result
         assert result["next_call"]["tool"] == "safe_read"
-        assert result["next_call"]["args"]["mode"] == "skeleton"
+        assert result["next_call"]["params"]["mode"] == "skeleton"
 
     def test_directory_returns_proposal(self, tmp_dir):
         d = Path(tmp_dir) / "testdir"
@@ -540,7 +540,7 @@ class TestFileReadProposal:
         assert result["ok"] is False
         assert "proposal" in result
         assert result["next_call"]["tool"] == "dir_list"
-        assert Path(result["next_call"]["args"]["path"]).resolve() == d.resolve()
+        assert Path(result["next_call"]["params"]["path"]).resolve() == d.resolve()
 
     def test_forbidden_path_returns_proposal(self):
         result = safe_read.read("C:/Windows/System32/kernel32.dll")
@@ -601,7 +601,7 @@ class TestFileReadValidation:
         result = safe_read.read(str(f), start_line=100)
         assert result["ok"] is False
         assert "超过" in result["error"]
-        assert result["next_call"]["args"]["tail"] == 3
+        assert result["next_call"]["params"]["tail"] == 3
 
     def test_invalid_line_range(self, tmp_dir):
         f = Path(tmp_dir) / "a.txt"
@@ -644,7 +644,7 @@ class TestLargeFilePaginationNextCall:
         assert result["next_call"] is not None, \
             "大文件截断时 next_call 不应为 None（否则 LLM 无法继续读取）"
         assert result["next_call"]["tool"] == "safe_read"
-        assert result["next_call"]["args"]["start_line"] == 201
+        assert result["next_call"]["params"]["start_line"] == 201
 
     def test_mid_file_range_on_large_file_has_next_call(self, tmp_dir):
         """大文件从中间用 max_lines 读取时 next_call 不能为 None。"""
@@ -657,7 +657,7 @@ class TestLargeFilePaginationNextCall:
         assert result["has_more"] is True
         assert result["next_call"] is not None, \
             "大文件中间截断时 next_call 不应为 None"
-        assert result["next_call"]["args"]["start_line"] == 5050
+        assert result["next_call"]["params"]["start_line"] == 5050
 
 
 class TestFindClosestLineIndent:

@@ -334,7 +334,7 @@ class TestCodeGraphTopSource:
             assert sym["total_lines"] == 122
             returned_lines = len(sym["source"].splitlines())
             assert returned_lines <= 65  # head 40 + tail 20 + 2 marker + 1
-            assert sym.get("next_call") == {"tool": "code_pack", "args": {"target": "big"}}
+            assert sym.get("next_call") == {"tool": "code_pack", "params": {"target": "big"}}
             assert "code_pack('big')" in sym.get("options", [])
             assert "code_pack" in sym.get("footer", "")
         finally:

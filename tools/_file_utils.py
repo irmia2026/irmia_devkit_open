@@ -34,8 +34,9 @@ _TEXT_EXTENSIONS = frozenset({
 })
 
 
-# safe_read 行号前缀（f"{n:>6}│ {line}"）——LLM 连前缀一起复制给编辑工具时的防呆
-_LINE_NUM_PREFIX_RE = re.compile(r"^\s{0,6}\d{1,6}│ ?")
+# safe_read 行号前缀（f"{n:>6}│ {line}"）——LLM 连前缀一起复制给编辑工具时的防呆。
+# 同时兼容 syntax_check/lint_runner 错误上下文的 "→  87│ code" 格式（可带 → 标记）。
+_LINE_NUM_PREFIX_RE = re.compile(r"^[\s→]{0,8}\d{1,6}│ ?")
 
 
 def strip_line_number_prefixes(text: str) -> tuple[str, bool]:

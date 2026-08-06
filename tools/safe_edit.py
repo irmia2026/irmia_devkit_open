@@ -436,6 +436,7 @@ def list_backups(filepath: str | None = None) -> dict:
         backups.append(
             {
                 "file": b.name,
+                "backup_name": b.name,
                 "size": stat.st_size,
                 "time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             }

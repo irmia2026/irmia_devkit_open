@@ -163,7 +163,7 @@ def _build_next_call_and_options(
         next_start = max(1, next_end - MAX_LINES_PER_CALL + 1)
         next_call = {
             "tool": "safe_read",
-            "args": {"path": path, "start_line": next_start, "end_line": next_end},
+            "params": {"path": path, "start_line": next_start, "end_line": next_end},
         }
         options = [
             f"Continue reading previous chunk (lines {next_start}-{next_end})",
@@ -175,7 +175,7 @@ def _build_next_call_and_options(
         next_start = end_line + 1
         next_call = {
             "tool": "safe_read",
-            "args": {"path": path, "start_line": next_start, "max_lines": MAX_LINES_PER_CALL},
+            "params": {"path": path, "start_line": next_start, "max_lines": MAX_LINES_PER_CALL},
         }
         options = [
             f"Continue reading from line {next_start}",
@@ -754,7 +754,7 @@ def read(
             error=f'Path not found: {path}',
             evidence={"path": str(p)},
             options=["dir_list", "safe_write"],
-            next_call={"tool": "dir_list", "args": {"path": str(p.parent) if p.parent else "."}},
+            next_call={"tool": "dir_list", "params": {"path": str(p.parent) if p.parent else "."}},
         )
     
     # 目录读取：不再展开条目，引导到专用工具
@@ -777,7 +777,7 @@ def read(
             error='Path is a directory',
             evidence=evidence,
             options=["dir_list", "dir_tree"],
-            next_call={"tool": "dir_list", "args": {"path": str(p)}},
+            next_call={"tool": "dir_list", "params": {"path": str(p)}},
         )
     
     if not p.is_file():
@@ -799,7 +799,7 @@ def read(
             error=f'File too large ({metadata.get("human_size", file_size)} > {human_size(MAX_FILE_SIZE)})',
             evidence={"path": str(p), "size": file_size, "human_size": metadata.get("human_size", human_size(file_size))},
             options=["skeleton", "rg_search", "head", "tail"],
-            next_call={"tool": "safe_read", "args": {"path": str(p), "mode": "skeleton"}},
+            next_call={"tool": "safe_read", "params": {"path": str(p), "mode": "skeleton"}},
         )
     
     detected_encoding = encoding if encoding != 'auto' else detect_encoding(p)
@@ -969,7 +969,7 @@ def read(
             error="start_line 超过文件总行数",
             evidence={"start_line": start_line, "total_lines": total_lines},
             options=[f"tail={tail_n}", "head=50"],
-            next_call={"tool": "safe_read", "args": {"path": str(p), "tail": tail_n}},
+            next_call={"tool": "safe_read", "params": {"path": str(p), "tail": tail_n}},
         )
 
     content = _format_content(lines, actual_start, line_numbers)

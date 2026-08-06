@@ -87,7 +87,7 @@ def _check_python(p: Path) -> dict:
         end = min(len(lines), e.lineno + 2)
         for i in range(start, end):
             marker = "→" if i == e.lineno - 1 else " "
-            context.append(f"{marker}{i + 1:>4}: {lines[i].rstrip()[:120]}")
+            context.append(f"{marker}{i + 1:>4}│ {lines[i].rstrip()[:120]}")
         errors = [
             {
                 "line": e.lineno,

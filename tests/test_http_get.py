@@ -201,9 +201,9 @@ class TestHttpGet:
         assert r["has_more"] is True
         assert r["next_call"] is not None
         assert r["next_call"]["tool"] == "http_get"
-        assert "offset" in r["next_call"]["args"]
-        assert "format" in r["next_call"]["args"]
-        assert "extract" in r["next_call"]["args"]
+        assert "offset" in r["next_call"]["params"]
+        assert "format" in r["next_call"]["params"]
+        assert "extract" in r["next_call"]["params"]
         assert r["content_length"] <= 8000
 
     def test_format_markdown_pagination(self, monkeypatch):
@@ -221,7 +221,7 @@ class TestHttpGet:
         assert r1["ok"] is True
         assert r1["has_more"] is True
         page1 = r1["content"]
-        next_offset = r1["next_call"]["args"]["offset"]
+        next_offset = r1["next_call"]["params"]["offset"]
 
         # 第二页
         r2 = get("http://example.com", format="markdown", offset=next_offset)

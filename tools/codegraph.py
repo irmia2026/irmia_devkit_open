@@ -434,6 +434,9 @@ class CodeGraph:
             result = self._explore_fallback(conn, query)
         # 索引新鲜度：索引后被修改的文件会让返回的行号/位置漂移
         if isinstance(result, dict) and result.get("ok"):
+            root = Path(self._db_path).resolve().parent.parent
+            result.setdefault("project_dir", str(root))
+            result.setdefault("path_note", "结果中的 file 为项目相对路径，调用 safe_read/safe_edit 前请与 project_dir 拼接")
             stale = self._staleness(conn, _result_files(result))
             if stale:
                 result["index_stale"] = True
@@ -774,7 +777,7 @@ class CodeGraph:
             "total_lines": total,
             "header": f"符号 '{name}' 源码共 {total} 行，超过 {_TOP_SOURCE_FULL_LINES} 行，已展示 {_TOP_SOURCE_HEAD_LINES} 行头 + {_TOP_SOURCE_TAIL_LINES} 行尾。",
             "footer": "需要完整源码请调用 code_pack。",
-            "next_call": {"tool": "code_pack", "args": {"target": name}},
+            "next_call": {"tool": "code_pack", "params": {"target": name}},
             "options": [f"code_pack('{name}')"],
         }
 
@@ -886,7 +889,9 @@ class CodeGraph:
                 break
 
         result = {"ok": True, "target": target_info, "dependencies": deps, "total_lines": total_lines,
-                "truncated": total_lines > _PACK_MAX_LINES}
+                "truncated": total_lines > _PACK_MAX_LINES,
+                "project_dir": str(Path(self._db_path).resolve().parent.parent),
+                "path_note": "结果中的 file 为项目相对路径，调用 safe_read/safe_edit 前请与 project_dir 拼接"}
         # 索引新鲜度：打包的源码/行号来自索引，索引后修改的文件内容会漂移
         stale = self._staleness(conn, [target_info["file"]] + [d["file"] for d in deps])
         if stale:
