@@ -232,7 +232,7 @@ def _port_check_w(host: str = "127.0.0.1", ports: list | None = None) -> dict:
 
 SafeEditTool = make_tool(
     "safe_edit",
-    "【改代码文件唯一选择】安全编辑：自动备份→精确替换→语法检查→通过保留/失败自动回滚。支持 .py/.nim/.go/.js/.ts（语法检查）+ 其他扩展名（跳过语法检查）。不要用 file_write 改已有代码（无备份无回滚）。不要用 astrbot_file_edit_tool 改代码（无备份无语法检查）。非代码文件（.md/.txt/.json）可以用 file_patch 或 safe_edit，两者均可。单文件单改优选；跨文件批量/同一文件多改 → 用 multi_edit（原子提交，继承本工具的空白容错能力）。当 old 文本在文件中多处匹配时，工具会报错并列出所有位置——用 occurrence=N 指定第几次出现继续。mode: replace(默认，old/new 文本替换) / insert_at_line(在 line 行后插入 new，line=0 为文件开头) / delete_lines(删除 start_line~end_line 闭区间行)。",
+    "【改代码文件唯一选择】安全编辑：自动备份→精确替换→语法检查→通过保留/失败自动回滚。支持 .py/.nim/.go/.js/.ts（语法检查）+ 其他扩展名（跳过语法检查）。不要用 file_write 改已有代码（无备份无回滚）。不要用 astrbot_file_edit_tool 改代码（无备份无语法检查）。非代码文件（.md/.txt/.json）可以用 file_patch 或 safe_edit，两者均可。单文件单改优选；跨文件批量/同一文件多改 → 用 multi_edit（原子提交，继承本工具的空白容错能力）。当 old 文本在文件中多处匹配时，工具会报错并列出所有位置——用 occurrence=N 指定第几次出现继续。mode: replace(默认，old/new 文本替换，old 误带 safe_read 行号前缀会自动剥除) / insert_at_line(在 line 行后插入 new，line=0 为文件开头，无需 old) / delete_lines(删除 start_line~end_line 闭区间行，无需 old)。已知行号时优先用行号模式，免去复制文本。",
     {
             "type": "object",
             "properties": {
@@ -1193,7 +1193,7 @@ MdStripTool = make_tool(
 
 FileReadTool = make_tool(
     "safe_read",
-    "【安全文件读取——替代 AstrBot 原生 file_read】安全读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、hex 转储、骨架提取。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常。目录浏览请用 dir_list / dir_tree；搜索请用 rg_search，不要在此工具内使用。",
+    "【安全文件读取——替代 AstrBot 原生 file_read】安全读取文件内容，支持编码自动检测、行号范围、分页、二进制预览、hex 转储、骨架提取。比原生更强大：自动检测编码（非仅 UTF-8/GBK）、大文件分页不撑爆上下文、二进制文件返回 hex 而非抛异常。输出默认带行号前缀（如 '  123│ 内容'）——行号仅供定位：要按行号插入/删除请直接用 safe_edit 的 mode=insert_at_line/delete_lines；要复制文本给 safe_edit/file_patch 的 old 参数时无需手动去除行号，编辑工具会自动识别剥除。目录浏览请用 dir_list / dir_tree；搜索请用 rg_search，不要在此工具内使用。",
     {
             "type": "object",
             "properties": {

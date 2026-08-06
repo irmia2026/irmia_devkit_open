@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem, check_path_allowed, prune_backups
+from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem, check_path_allowed, prune_backups, strip_line_number_prefixes
 from .safe_edit import _backup_dir
 from .syntax_check import check as syntax_check_file
 
@@ -62,6 +62,15 @@ def _apply_one(content: str, edit_item: dict, item_index: int) -> tuple[str, dic
     if replace_all and occurrence > 0:
         raise ValueError(f"edit #{item_index}: replace_all and occurrence are mutually exclusive")
     positions = _positions(content, old)
+    if not positions:
+        # 防呆：LLM 把 safe_read 行号前缀（'  123│ ...'）连内容复制给 old 时剥除重试
+        stripped_old, had_prefix = strip_line_number_prefixes(old)
+        if had_prefix:
+            stripped_new, _ = strip_line_number_prefixes(new)
+            p2 = _positions(content, stripped_old)
+            if p2:
+                old, new = stripped_old, stripped_new
+                positions = p2
     if not positions:
         # P0-1: whitespace-tolerant fallback (inherited from safe_edit)
         aligned = align_whitespace(content, old, new)

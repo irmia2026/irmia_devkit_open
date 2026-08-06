@@ -34,6 +34,35 @@ _TEXT_EXTENSIONS = frozenset({
 })
 
 
+# safe_read 行号前缀（f"{n:>6}│ {line}"）——LLM 连前缀一起复制给编辑工具时的防呆
+_LINE_NUM_PREFIX_RE = re.compile(r"^\s{0,6}\d{1,6}│ ?")
+
+
+def strip_line_number_prefixes(text: str) -> tuple[str, bool]:
+    """若文本所有非空行都带 safe_read 行号前缀（'  123│ ...'），剥除前缀。
+
+    仅在**所有**非空行都匹配时剥除（避免破坏部分含 '│' 的正常文本）。
+    调用方必须先尝试精确匹配，失败后才用本函数兜底——文件中字面包含
+    '数字│' 的内容仍能走精确匹配路径。
+
+    Returns:
+        (stripped_text, changed)
+    """
+    if "│" not in text:
+        return text, False
+    lines = text.split("\n")
+    content_lines = [l for l in lines if l.strip()]
+    if not content_lines:
+        return text, False
+    if not all(_LINE_NUM_PREFIX_RE.match(l) for l in content_lines):
+        return text, False
+    stripped = [
+        _LINE_NUM_PREFIX_RE.sub("", l, count=1) if l.strip() else l
+        for l in lines
+    ]
+    return "\n".join(stripped), True
+
+
 # 文本编码探测相关常量
 _PROBE_BYTES = 512  # 文件探针字节数
 _TEXT_ENCODINGS = (

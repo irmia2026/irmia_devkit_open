@@ -21,6 +21,7 @@ from ._file_utils import (
     _first_existing_parent,
     backup_name_stem,
     prune_backups,
+    strip_line_number_prefixes,
 )
 
 
@@ -164,6 +165,18 @@ def edit(
     else:
         # 0.2 消歧
         old_count = content.count(old)
+        result_extra = {}
+
+        if old_count == 0:
+            # 防呆：LLM 把 safe_read 的行号前缀（'  123│ ...'）连内容一起复制
+            # 给 old 时，剥除前缀后重试。精确匹配已在上方失败，此处安全。
+            stripped_old, had_prefix = strip_line_number_prefixes(old)
+            if had_prefix:
+                stripped_new, _ = strip_line_number_prefixes(new)
+                if content.count(stripped_old) > 0:
+                    old, new = stripped_old, stripped_new
+                    old_count = content.count(old)
+                    result_extra = {"line_numbers_stripped": True}
 
         if occurrence < 0:
             return {"ok": False, "error": "occurrence 不能为负数"}
@@ -196,8 +209,6 @@ def edit(
                     "evidence": closest or {},
                     "options": ["复制最接近的行作为 old", "确认缩进级别"],
                 }
-        else:
-            result_extra = {}
 
         # ── 消歧与替换 ──
 

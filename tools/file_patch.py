@@ -8,7 +8,7 @@ import difflib
 from pathlib import Path
 
 from ._file_utils import read_file, read_file_with_encoding, find_closest_line, align_whitespace, atomic_write_text
-from ._file_utils import check_path_allowed
+from ._file_utils import check_path_allowed, strip_line_number_prefixes
 
 
 def _normalize_line_endings(s: str) -> str:
@@ -103,6 +103,15 @@ def patch(
         norm_new = _normalize_line_endings(new)
 
         aligned_old = None
+        stripped_prefix = False
+        if norm_old not in norm_content:
+            # 防呆：LLM 把 safe_read 行号前缀（'  123│ ...'）连内容复制给 old 时剥除重试
+            stripped_old, had_prefix = strip_line_number_prefixes(norm_old)
+            if had_prefix:
+                stripped_new, _ = strip_line_number_prefixes(norm_new)
+                if stripped_old in norm_content:
+                    norm_old, norm_new = stripped_old, stripped_new
+                    stripped_prefix = True
         if norm_old not in norm_content:
             # P0-1: whitespace-tolerant fallback before giving up
             aligned = align_whitespace(norm_content, norm_old, norm_new, preserve_inner_indent)
@@ -154,6 +163,8 @@ def patch(
         if aligned_old is not None:
             result["whitespace_aligned"] = True
             result["aligned_old"] = aligned_old[:80]
+        if stripped_prefix:
+            result["line_numbers_stripped"] = True
         if occurrence > 0:
             result["occurrence"] = occurrence
         elif not replace_all and count > 1:
@@ -195,6 +206,12 @@ def preview(
     norm_old = _normalize_line_endings(old)
     norm_new = _normalize_line_endings(new)
 
+    if norm_old not in norm_content:
+        stripped_old, had_prefix = strip_line_number_prefixes(norm_old)
+        if had_prefix:
+            stripped_new, _ = strip_line_number_prefixes(norm_new)
+            if stripped_old in norm_content:
+                norm_old, norm_new = stripped_old, stripped_new
     if norm_old not in norm_content:
         aligned = align_whitespace(norm_content, norm_old, norm_new, preserve_inner_indent)
         if aligned:

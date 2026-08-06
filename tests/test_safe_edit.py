@@ -448,3 +448,101 @@ class TestFilePatchOccurrence:
         assert "b = 9" in r["diff"]
         # 预览不修改文件
         assert Path(fp).read_text(encoding="utf-8") == "a = 1\nb = 1\n"
+
+
+class TestLineNumberPrefixTolerance:
+    """防呆：LLM 把 safe_read 行号前缀（'  123│ ...'）连内容复制给编辑工具时自动剥除。"""
+
+    def _py(self, tmp_dir, content="def foo():\n    x = 1\n    return x\n"):
+        p = Path(tmp_dir) / "lp.py"
+        p.write_text(content, encoding="utf-8")
+        return str(p)
+
+    def test_strip_helper_all_prefixed(self):
+        from tools._file_utils import strip_line_number_prefixes
+
+        stripped, changed = strip_line_number_prefixes("     1│ def foo():\n     2│     x = 1\n")
+        assert changed is True
+        assert stripped == "def foo():\n    x = 1\n"
+
+    def test_strip_helper_partial_prefix_no_strip(self):
+        from tools._file_utils import strip_line_number_prefixes
+
+        text = "     1│ def foo():\nplain line\n"
+        stripped, changed = strip_line_number_prefixes(text)
+        assert changed is False
+        assert stripped == text
+
+    def test_strip_helper_no_marker_fast_path(self):
+        from tools._file_utils import strip_line_number_prefixes
+
+        stripped, changed = strip_line_number_prefixes("plain\ntext\n")
+        assert changed is False
+        assert stripped == "plain\ntext\n"
+
+    def test_safe_edit_prefixed_old_matches(self, tmp_dir):
+        from tools.safe_edit import edit
+
+        fp = self._py(tmp_dir)
+        r = edit(fp, old="     2│     x = 1", new="    x = 42")
+        assert r["ok"] is True
+        assert r.get("line_numbers_stripped") is True
+        assert "    x = 42" in Path(fp).read_text(encoding="utf-8")
+
+    def test_safe_edit_prefixed_multiline_old_and_new(self, tmp_dir):
+        from tools.safe_edit import edit
+
+        fp = self._py(tmp_dir)
+        old = "     2│     x = 1\n     3│     return x"
+        new = "     2│     x = 42\n     3│     return x"
+        r = edit(fp, old=old, new=new)
+        assert r["ok"] is True
+        assert "    x = 42\n    return x" in Path(fp).read_text(encoding="utf-8")
+
+    def test_safe_edit_literal_box_char_exact_match_wins(self, tmp_dir):
+        """文件字面包含 '数字│' 内容时，精确匹配优先，防呆不得误剥。"""
+        from tools.safe_edit import edit
+
+        p = Path(tmp_dir) / "note.txt"
+        p.write_text("note: 2│ keep this\nother\n", encoding="utf-8")
+        r = edit(str(p), old="2│ keep this", new="2│ changed")
+        assert r["ok"] is True
+        assert "line_numbers_stripped" not in r
+        assert "2│ changed" in p.read_text(encoding="utf-8")
+
+    def test_safe_edit_prefixed_old_not_found_still_error(self, tmp_dir):
+        from tools.safe_edit import edit
+
+        fp = self._py(tmp_dir)
+        r = edit(fp, old="     9│     y = 999", new="    y = 1")
+        assert r["ok"] is False
+        assert Path(fp).read_text(encoding="utf-8").count("x = 1") == 1
+
+    def test_file_patch_prefixed_old(self, tmp_dir):
+        from tools.file_patch import patch
+
+        p = Path(tmp_dir) / "lp.txt"
+        p.write_text("a = 1\nb = 2\n", encoding="utf-8")
+        r = patch(str(p), "     1│ a = 1", "a = 9")
+        assert r["ok"] is True
+        assert r.get("line_numbers_stripped") is True
+        assert p.read_text(encoding="utf-8") == "a = 9\nb = 2\n"
+
+    def test_file_patch_preview_prefixed_old(self, tmp_dir):
+        from tools.file_patch import preview
+
+        p = Path(tmp_dir) / "lp.txt"
+        p.write_text("a = 1\nb = 2\n", encoding="utf-8")
+        r = preview(str(p), "     2│ b = 2", "b = 9")
+        assert r["ok"] is True
+        assert "b = 9" in r["diff"]
+        assert p.read_text(encoding="utf-8") == "a = 1\nb = 2\n"
+
+    def test_multi_edit_prefixed_old(self, tmp_dir):
+        from tools.multi_edit import run
+
+        p = Path(tmp_dir) / "lp.txt"
+        p.write_text("a = 1\nb = 2\n", encoding="utf-8")
+        r = run([{"file": str(p), "old": "     1│ a = 1", "new": "a = 9"}], syntax_check=False)
+        assert r["ok"] is True
+        assert p.read_text(encoding="utf-8") == "a = 9\nb = 2\n"
