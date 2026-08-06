@@ -58,7 +58,7 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 
 | Tool | Description |
 |------|-------------|
-| `safe_edit` | Backup → replace → syntax check → keep/rollback; line-insert/delete modes. **Only way to edit code** |
+| `safe_edit` | Backup → replace → syntax check → keep/rollback; line-insert/delete modes; auto-strips copied line-number prefixes. **Only way to edit code** |
 | `safe_write` | Create new files / overwrite whole files with syntax check |
 | `safe_rollback` | Rollback file to a backup |
 | `safe_backups` | List backup files (auto retention: 10 per file + 500MB LRU) |

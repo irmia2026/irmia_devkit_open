@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — 行号防呆 / 行号准确性 / 跨工具协议一致性
+
+- **编辑工具行号防呆**: safe_edit / file_patch / multi_edit 在精确匹配失败时，检测 old/new 是否所有行都带 safe_read 行号前缀（`  123│ ...`），是则自动剥除重试；精确匹配优先，文件字面含 `│` 的内容不受影响（有测试锁定）。
+- **safe_read tail 行号修复（正确性）**: >1MB 文件的 tail 行号原先由采样估算的总行数推导，实测可漂移数万行，行号寻址编辑会删错行；改为精确统计（文件本有 10MB 上限，成本 ~50ms）。
+- **估算值显式标记**: head/range 大文件路径的 `total_lines` 仍为采样估算，响应新增 `total_lines_estimated: true/false` 字段供 LLM 区分。
+- **codegraph 索引过期提示**: code_explore / code_pack 的符号行号与打包源码来自索引时刻，索引后编辑过的文件会漂移；现做 mtime 探测，过期时返回 `index_stale` + `stale_warning`（引导 code_index incremental）。
+- **next_call 协议统一**: 参数键 `args`/`params` 混用（8 处）统一为 `params`。
+- **safe_backups 链路透名**: 备份条目新增 `backup_name` 别名（原 `file` 键保留），与 safe_rollback 参数名对齐。
+- **code_explore/code_pack 路径提示**: 结果中的 file 为项目相对路径，新增 `project_dir` + `path_note` 字段引导拼接后再调 safe_read/safe_edit。
+- **错误上下文格式统一**: syntax_check / lint_runner 的错误上下文从 `  87: code` 改为与 safe_read 一致的 `  87│ code` 格式，行号剥除防呆同步兼容 `→` 标记，全工具箱复制链路闭合。
+- **测试**: 全量 678 passed、8 skipped（新增行号准确性、索引过期、防呆兼容等 17 条用例）。
+
 ## v2.6.4 — 全量 code review 修复：响应协议 / 备份生命周期 / 行号寻址编辑 / CI 日志
 
 - **safe_edit 行号寻址**: 新增 `mode=insert_at_line`（`line` 后插入，`0`=文件开头）/ `delete_lines`（`start_line~end_line` 闭区间删除），走完整备份→语法检查→回滚链路；参数 `preserve_inner_indent` 更名 `align_whitespace`（语义不变）。
