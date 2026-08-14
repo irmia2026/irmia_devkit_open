@@ -285,10 +285,21 @@ def human_size(n: int) -> str:
     return s.replace(".0PB", "PB")
 
 
+def _atomic_target_mode(path: str | Path) -> int | None:
+    """返回原子替换后的 POSIX 权限位；非 POSIX 平台不做 mode 处理。"""
+    if os.name != "posix":
+        return None
+    try:
+        return Path(path).stat().st_mode & 0o777
+    except FileNotFoundError:
+        return 0o644
+
+
 def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -> None:
     """原子写入文本文件：先写同目录临时文件，再 os.replace 替换目标文件。
 
     保留原始换行符（调用方需确保 content 中的换行符已是期望形式）。
+    POSIX 下保留现有文件权限位；新文件默认 0644。
     """
     import os as _os
     import tempfile as _tmp
@@ -299,6 +310,9 @@ def atomic_write_text(path: str | Path, content: str, encoding: str = "utf-8") -
     try:
         with _os.fdopen(fd, "w", encoding=encoding, newline="") as f:
             f.write(content)
+        final_mode = _atomic_target_mode(target)
+        if final_mode is not None:
+            _os.chmod(tmp, final_mode)
         _os.replace(str(tmp), str(target))
     except Exception:
         try:

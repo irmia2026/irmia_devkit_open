@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -175,6 +176,21 @@ class TestAtomicWriteText:
         p = Path(tmp_dir) / "out.txt"
         fu.atomic_write_text(p, "café", encoding="latin-1")
         assert p.read_bytes() == "café".encode("latin-1")
+
+    @pytest.mark.skipif(os.name != "posix", reason="requires POSIX permission bits")
+    def test_new_file_uses_0644_mode(self, tmp_dir):
+        p = Path(tmp_dir) / "out.txt"
+        fu.atomic_write_text(p, "new")
+        assert stat.S_IMODE(p.stat().st_mode) == 0o644
+
+    @pytest.mark.skipif(os.name != "posix", reason="requires POSIX permission bits")
+    @pytest.mark.parametrize("mode", [0o600, 0o640, 0o755])
+    def test_overwrite_preserves_existing_mode(self, tmp_dir, mode):
+        p = Path(tmp_dir) / "out.txt"
+        p.write_text("old", encoding="utf-8")
+        p.chmod(mode)
+        fu.atomic_write_text(p, "new")
+        assert stat.S_IMODE(p.stat().st_mode) == mode
 
 
 class TestBackupNameStem:

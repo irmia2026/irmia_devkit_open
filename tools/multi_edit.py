@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ._file_utils import SAFE_EDIT_MAX_SIZE, read_file_with_encoding, find_closest_line, align_whitespace, backup_name_stem, check_path_allowed, prune_backups, strip_line_number_prefixes
+from ._file_utils import _atomic_target_mode
 from .safe_edit import _backup_dir
 from .syntax_check import check as syntax_check_file
 
@@ -266,6 +267,9 @@ def run(edits: list, syntax_check: bool = True) -> dict:
                 f.write(final_content)
             tmp_paths[path] = Path(tmp_name)
         for path, tmp_path in tmp_paths.items():
+            final_mode = _atomic_target_mode(path)
+            if final_mode is not None:
+                os.chmod(tmp_path, final_mode)
             os.replace(str(tmp_path), str(path))
     except Exception as exc:
         rollback_errors = []
