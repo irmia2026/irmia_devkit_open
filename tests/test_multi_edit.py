@@ -1,6 +1,7 @@
 """Tests for multi_edit."""
 
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -26,6 +27,15 @@ class TestMultiEdit:
         r = run([{"file": tmp_file, "old": "x = 1", "new": "x = 2"}])
         assert r["ok"] is True
         assert Path(tmp_file).read_text(encoding="utf-8") == "x = 2\n"
+
+    @pytest.mark.skipif(os.name != "posix", reason="requires POSIX permission bits")
+    def test_preserves_existing_mode(self, tmp_file):
+        path = Path(tmp_file)
+        path.write_text("x = 1\n", encoding="utf-8")
+        path.chmod(0o640)
+        r = run([{"file": tmp_file, "old": "x = 1", "new": "x = 2"}])
+        assert r["ok"] is True
+        assert stat.S_IMODE(path.stat().st_mode) == 0o640
 
     def test_replace_all(self, tmp_file):
         Path(tmp_file).write_text("x = 1\nx = 1\n", encoding="utf-8")
