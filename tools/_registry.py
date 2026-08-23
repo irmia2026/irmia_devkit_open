@@ -1832,6 +1832,7 @@ DbQueryTool = make_tool(
                 "sql": {"type": "string", "description": "SELECT 或 PRAGMA 查询语句"},
                 "params": {
                     "type": "array",
+                    "items": {},
                     "description": '查询参数列表，元素可为任意 JSON 类型，如 [42, "active"]',
                 },
             },
