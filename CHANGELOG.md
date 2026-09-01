@@ -13,6 +13,9 @@
 - **http_get SPA 检测**: 转换后几乎无文本但原始 HTML 含大量脚本时，返回附 `hint` 提示疑似 JS 动态渲染（本工具不执行 JS）并给出替代建议，不再让 LLM 面对"成功但空白"误判。
 - **http_get/http_post 错误可操作化**: HTTP 错误按状态码附排查 hint（401 认证 / 403 反爬 WAF / 404 失效 / 405 方法 / 429 限流 / 5xx 服务端），连接层错误区分 DNS 解析失败/超时（含当前 timeout 值）/拒连；自动重试后仍失败时透传 `retries` 次数；SSRF 拦截不再被"连接失败"前缀伪装成网络故障。
 - **http_get/http_post timeout clamp**: 直接调用也钳制到 1~600s（原仅注册表层对 post 生效），非法值回退默认。
+- **http_get review 修复（安全）**: ① 解压改 `zlib.decompressobj` 流式限长，压缩炸弹内存有界（原全量解压后才截断，1MB gzip 实测可撑 2GB）；② 翻页缓存 key 纳入 headers 规范化指纹，修复跨凭据缓存命中导致的机密内容泄露，`next_call` 同步透传 headers；③ script/style 剔除从正则改为线性扫描，修复大量无闭合标签构造的 O(n·m) DoS；④ SSRF 拦截改用专用异常 `SsrfBlocked`（原靠消息文案字符串匹配，脆弱耦合）。
+- **http_get review 修复（健壮性）**: `RemoteDisconnected`/`ConnectionResetError` 等非 URLError 连接错误纳入重试；offset 非整型返回错误而非 TypeError 泄漏；下载截断的压缩流返回已解压部分内容并标记（原静默返回压缩垃圾）；br/zstd 等不支持编码明确报错；HTTP 错误体读取限长 4KB；重试加总耗时预算（cap 180s，防大 timeout×重试放大）；重试前 close 失败响应；429 hint 与不重试行为对齐；自定义 UA/Accept-Encoding 大小写不敏感匹配；http_post 补二进制分流；编码嗅探只取前 64KB。
+- **测试修复**: 分页衔接断言原切片恒空（`startswith("")` 恒真）的假阳性改为与缓存全文比对；FakeResponse headers 改大小写不敏感（对齐真实 HTTPMessage）；GBK 嗅探 skip 守卫修正为任一嗅探库。
 - **db_query**: params schema 补 `items`（数组类型缺 items 导致 Gemini function calling 400 INVALID_ARGUMENT，43004d6）。
 
 ## v2.6.4 — 全量 code review 修复：响应协议 / 备份生命周期 / 行号寻址编辑 / CI 日志

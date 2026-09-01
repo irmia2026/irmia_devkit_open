@@ -1,6 +1,6 @@
 """
 http_get — 纯标准库 HTTP 客户端。
-快速 GET/POST，10s 超时，返回 status + body + size。
+快速 GET/POST，默认 15s 超时（可调），返回 status + body + size。
 用于取 raw GitHub 内容、API 调用等场景。
 """
 from __future__ import annotations
@@ -9,8 +9,9 @@ from collections import OrderedDict
 import threading
 import time
 
-import gzip
+import http.client
 import json
+import math
 import re
 import socket
 import urllib.error
@@ -18,7 +19,7 @@ import urllib.request
 import zlib
 from typing import Any
 
-from ._http_utils import check_url, make_opener
+from ._http_utils import SsrfBlocked, check_url, make_opener
 
 
 _MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5MB：超过此大小截断
@@ -29,15 +30,29 @@ _PAGE_CACHE_TTL = 300  # 页面缓存有效期（秒），过期重新请求
 _DEFAULT_TIMEOUT = 15  # 默认超时秒数
 _MAX_RETRIES = 2  # GET 失败重试次数（仅 5xx / 连接错误；POST 非幂等不重试）
 _RETRY_BACKOFF = 0.5  # 重试退避基数（秒），按 2^attempt 指数增长
+_TOTAL_BUDGET_CAP = 180  # 重试总耗时预算上限（秒），防大 timeout × 重试放大阻塞
 
 
-# ── 翻页缓存：key=(url, format, extract) → 完整转换结果 ──
+# ── 翻页缓存：key=(url, format, extract, headers指纹) → 完整转换结果 ──
 _page_cache: OrderedDict = OrderedDict()
 _page_cache_lock = threading.Lock()
 
+# headers 无法规范化时的哨兵：跳过缓存读写（绝不退化到无头共享 key，防跨凭据泄露）
+_NO_CACHE = object()
 
-def _cache_key(url: str, format: str, extract: bool) -> tuple:
-    return (url, format, extract)
+
+def _headers_fingerprint(headers: dict | None):
+    """请求头规范化指纹（小写键排序）。None=无自定义头；_NO_CACHE=不可缓存。"""
+    if not headers:
+        return None
+    try:
+        return tuple(sorted((str(k).lower(), str(v)) for k, v in headers.items()))
+    except Exception:
+        return _NO_CACHE
+
+
+def _cache_key(url: str, format: str, extract: bool, headers_fp=None) -> tuple:
+    return (url, format, extract, headers_fp)
 
 
 def _get_cached(key: tuple) -> dict | None:
@@ -135,6 +150,33 @@ def _detect_charset(resp, raw: bytes) -> str:
     return "utf-8"
 
 
+class _BodyReadError(Exception):
+    """响应体读取/解压失败，消息可直接作为 error 返回给调用方。"""
+
+
+def _decompress_limited(raw: bytes, content_encoding: str, max_bytes: int) -> tuple:
+    """流式解压并限长（内存峰值有界，防压缩炸弹）。返回 (data, hit_limit)。
+
+    下载截断的压缩流不抛错——返回已解压的部分内容（以 hit_limit 标记）；
+    数据损坏或编码声明不实时抛 _BodyReadError。
+    """
+    if content_encoding in ("gzip", "x-gzip"):
+        wbits_list = (16 + zlib.MAX_WBITS,)
+    else:  # deflate：先按 zlib 头解析，失败回退 raw deflate
+        wbits_list = (zlib.MAX_WBITS, -zlib.MAX_WBITS)
+    last_err = None
+    for wbits in wbits_list:
+        d = zlib.decompressobj(wbits)
+        try:
+            out = d.decompress(raw, max_bytes + 1)
+        except zlib.error as e:
+            last_err = e
+            continue
+        hit_limit = len(out) > max_bytes or bool(d.unconsumed_tail) or not d.eof
+        return out[:max_bytes], hit_limit
+    raise _BodyReadError(f"{content_encoding} 解压失败（数据损坏或编码声明不实）: {last_err}")
+
+
 def _read_limited(resp, max_bytes: int = _MAX_RESPONSE_SIZE) -> tuple:
     """分块读取响应体（上限 max_bytes），按嗅探到的编码解码。返回 (body, truncated)。"""
     chunks = []
@@ -151,30 +193,20 @@ def _read_limited(resp, max_bytes: int = _MAX_RESPONSE_SIZE) -> tuple:
     truncated = total >= max_bytes and bool(resp.read(1))
     raw = b"".join(chunks)
 
-    # 解压：Accept-Encoding 协商或服务器强制压缩的结果
+    # 解压：Accept-Encoding 协商或服务器强制压缩的结果（流式限长，防压缩炸弹）
     headers = getattr(resp, "headers", None)
     content_encoding = ""
     if headers is not None:
         content_encoding = (headers.get("Content-Encoding", "") or "").strip().lower()
-    if content_encoding in ("gzip", "x-gzip"):
-        try:
-            raw = gzip.decompress(raw)
-        except Exception:
-            pass
-    elif content_encoding == "deflate":
-        try:
-            raw = zlib.decompress(raw)
-        except Exception:
-            try:
-                raw = zlib.decompress(raw, -zlib.MAX_WBITS)
-            except Exception:
-                pass
-    # 解压后可能远超下载上限（压缩比），再截断一次防内存膨胀
-    if len(raw) > max_bytes:
-        raw = raw[:max_bytes]
-        truncated = True
+    if content_encoding in ("gzip", "x-gzip", "deflate"):
+        raw, hit_limit = _decompress_limited(raw, content_encoding, max_bytes)
+        truncated = truncated or hit_limit
+    elif content_encoding and content_encoding != "identity":
+        raise _BodyReadError(
+            f"服务器返回了不支持的压缩编码 ({content_encoding})，本工具仅支持 gzip/deflate"
+        )
 
-    charset = _detect_charset(resp, raw)
+    charset = _detect_charset(resp, raw[:65536])  # 嗅探前 64KB 足够
     try:
         body = raw.decode(charset, errors="replace")
     except (LookupError, ValueError):
@@ -196,20 +228,40 @@ def _build_response(resp, url: str = "") -> dict:
 
 
 def _open_with_retry(req, timeout: int, max_retries: int = _MAX_RETRIES):
-    """带指数退避的请求执行。仅对 5xx 与连接错误重试；SSRF 拦截与 4xx 立即抛出。
+    """带指数退避的请求执行。
 
-    抛出时给异常挂上 _retries 属性（已重试次数），供错误消息透传。
+    - 重试对象：5xx、连接层错误（URLError 及 RemoteDisconnected/ConnectionReset 等 OSError/HTTPException）
+    - 不重试：4xx（客户端错误）、SSRF 拦截（安全决策，按异常类型识别）
+    - 总耗时预算 min(timeout×尝试数, max(timeout, _TOTAL_BUDGET_CAP))，防大 timeout × 重试放大
+    - 抛出时给异常挂上 _retries 属性（已重试次数），供错误消息透传
     """
+    budget = min(timeout * (max_retries + 1), max(timeout, _TOTAL_BUDGET_CAP))
+    start = time.monotonic()
     for attempt in range(max_retries + 1):
+        remaining = budget - (time.monotonic() - start)
+        if remaining <= 0:
+            err = urllib.error.URLError(TimeoutError("重试总耗时预算耗尽"))
+            err._retries = attempt
+            raise err
         try:
-            return make_opener().open(req, timeout=timeout)
+            return make_opener().open(req, timeout=min(timeout, max(1, math.ceil(remaining))))
         except urllib.error.HTTPError as e:
             if e.code < 500 or attempt >= max_retries:
                 e._retries = attempt
                 raise
+            try:
+                e.close()  # 释放失败响应占用的套接字资源
+            except Exception:
+                pass
+        except SsrfBlocked:
+            raise  # SSRF 安全拦截：绝不重试
         except urllib.error.URLError as e:
-            reason = str(getattr(e, "reason", "") or e)
-            if "重定向目标被拦截" in reason or attempt >= max_retries:
+            if attempt >= max_retries:
+                e._retries = attempt
+                raise
+        except (http.client.HTTPException, OSError) as e:
+            # RemoteDisconnected/ConnectionResetError 等非 URLError 的瞬时连接错误
+            if attempt >= max_retries:
                 e._retries = attempt
                 raise
         time.sleep(_RETRY_BACKOFF * (2 ** attempt))
@@ -221,7 +273,7 @@ _STATUS_HINTS = {
     403: "访问被拒——可能是反爬/WAF 拦截（本工具无浏览器指纹），可换地址、稍后重试，或寻找官方 API",
     404: "页面不存在——检查 URL 拼写，链接可能已失效",
     405: "方法不允许——该地址可能只接受 POST（http_post）等方法",
-    429: "请求过于频繁（限流）——请稍后重试",
+    429: "触发限流——自动重试对限流无效（未执行），请等待一段时间后再手动重试",
 }
 
 
@@ -229,7 +281,7 @@ def _http_error_dict(e, retried: int = 0) -> dict:
     """HTTP 错误结构化：状态码 + 可操作 hint + 重试次数。"""
     body = ""
     try:
-        body = e.read().decode("utf-8", errors="replace")[:500]
+        body = e.read(4096).decode("utf-8", errors="replace")[:500]
     except Exception:
         pass
     error = f"HTTP {e.code}: {e.reason}"
@@ -249,11 +301,11 @@ def _http_error_dict(e, retried: int = 0) -> dict:
 
 def _url_error_dict(e, timeout: int, retried: int = 0) -> dict:
     """连接层错误结构化：区分 DNS/超时/拒连，附可操作 hint。"""
+    if isinstance(e, SsrfBlocked):
+        # SSRF 安全拦截：原样透出，不伪装成网络故障
+        return {"ok": False, "error": str(getattr(e, "reason", e))}
     reason = getattr(e, "reason", e)
     reason_s = str(reason)
-    if "重定向目标被拦截" in reason_s:
-        # SSRF 安全拦截：原样透出，不伪装成网络故障
-        return {"ok": False, "error": reason_s}
     error = f"连接失败: {reason_s}"
     if retried:
         error += f"（已自动重试 {retried} 次）"
@@ -295,6 +347,45 @@ def _extract_metadata(html: str) -> dict:
     return {"title": title, "description": description}
 
 
+def _strip_tag_blocks(html: str, tag: str) -> str:
+    """线性时间剔除 <tag>...</tag> 块（含内容）。
+
+    替代正则剔除：正则 <tag[\\s\\S]*?</tag> 在大量无闭合标签时退化为 O(n·m)（DoS 面）。
+    未闭合的开标签只去掉标签本身并保留后续内容，避免误删正文。
+    """
+    lower = html.lower()
+    open_pat = "<" + tag
+    close_pat = "</" + tag
+    out = []
+    i = 0
+    n = len(html)
+    while i < n:
+        j = lower.find(open_pat, i)
+        if j == -1:
+            out.append(html[i:])
+            break
+        after = j + len(open_pat)
+        # 确认是标签起始（<scriptx 之类的误命中跳过）
+        if after < n and lower[after] not in " \t\r\n>/":
+            out.append(html[i:after])
+            i = after
+            continue
+        gt = lower.find(">", after)
+        if gt == -1:
+            out.append(html[i:j])  # 开标签未闭合：丢弃标签残余，收尾
+            break
+        k = lower.find(close_pat, gt)
+        if k == -1:
+            # 全文已无闭合标签：只丢开标签，保留其余内容（防误删正文），线性收尾
+            out.append(html[i:j])
+            out.append(html[gt + 1:])
+            break
+        gt2 = lower.find(">", k + len(close_pat))
+        out.append(html[i:j])
+        i = (gt2 + 1) if gt2 != -1 else n
+    return "".join(out)
+
+
 def _convert_html(html: str, format: str, extract: bool) -> tuple[str, str]:
     """将 HTML 转换为 markdown 或 text，返回 (内容, 实际使用的转换器)。
 
@@ -308,8 +399,8 @@ def _convert_html(html: str, format: str, extract: bool) -> tuple[str, str]:
         try:
             from markdownify import markdownify as md
             # 先剔除 script/style 整块（含内容）——markdownify 的 strip 只去标签不去文本
-            h = re.sub(r"<script[\s\S]*?</script\s*>", "", h, flags=re.IGNORECASE)
-            h = re.sub(r"<style[\s\S]*?</style\s*>", "", h, flags=re.IGNORECASE)
+            h = _strip_tag_blocks(h, "script")
+            h = _strip_tag_blocks(h, "style")
             text = md(h, heading_style="ATX", strip=["script", "style"])
             if format == "text":
                 text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
@@ -359,7 +450,8 @@ def _convert_html(html: str, format: str, extract: bool) -> tuple[str, str]:
     return _bs4_plain(html), "bs4"
 
 
-def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) -> dict:
+def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool,
+              headers: dict | None = None) -> dict:
     """从缓存的完整内容中切出一页，附 has_more / next_call / options。"""
     content = entry["content"]
     total = len(content)
@@ -370,15 +462,15 @@ def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) ->
     options = []
     if has_more:
         next_offset = offset + len(page)
-        next_call = {
-            "tool": "http_get",
-            "params": {
-                "url": url,
-                "format": format,
-                "extract": extract,
-                "offset": next_offset,
-            },
+        params = {
+            "url": url,
+            "format": format,
+            "extract": extract,
+            "offset": next_offset,
         }
+        if headers:
+            params["headers"] = headers  # 翻页透传，保证缓存 key 的 headers 指纹一致
+        next_call = {"tool": "http_get", "params": params}
         options = [
             f"继续阅读下一页 (offset={next_offset})",
             "换个更精确的 URL 或减小范围",
@@ -411,9 +503,10 @@ def _paginate(entry: dict, offset: int, url: str, format: str, extract: bool) ->
 
 
 def _add_ua(req, headers: dict | None):
-    if not headers or "User-Agent" not in headers:
+    lowered = {str(k).lower() for k in headers} if headers else set()
+    if "user-agent" not in lowered:
         req.add_header("User-Agent", "IrmiaDevKit/2.3")
-    if not headers or "Accept-Encoding" not in headers:
+    if "accept-encoding" not in lowered:
         # 只广告内置可解压的编码；服务器强制压缩时也能正确处理
         req.add_header("Accept-Encoding", "gzip, deflate, identity")
 
@@ -456,6 +549,10 @@ def get(
     if format not in valid_formats:
         return {"ok": False, "error": f"format 无效: {format}，可选 {valid_formats}"}
 
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": f"offset 必须为整数: {offset!r}"}
     if offset < 0:
         return {"ok": False, "error": f"offset 不能为负数: {offset}"}
 
@@ -465,14 +562,16 @@ def get(
         timeout = _DEFAULT_TIMEOUT
 
     # markdown/text 翻页：先查翻页缓存，命中直接切片返回——不重复下载，
-    # 对端故障/限流时缓存内容依然可用
+    # 对端故障/限流时缓存内容依然可用。缓存 key 含 headers 指纹，防跨凭据串号/泄露
+    headers_fp = _headers_fingerprint(headers)
+    cacheable = headers_fp is not _NO_CACHE
     key = None
-    if format in ("markdown", "text"):
-        key = _cache_key(url, format, extract)
+    if format in ("markdown", "text") and cacheable:
+        key = _cache_key(url, format, extract, headers_fp)
         if offset > 0:
             cached = _get_cached(key)
             if cached is not None and offset < len(cached["content"]):
-                return _paginate(cached, offset, url, format, extract)
+                return _paginate(cached, offset, url, format, extract, headers)
             # 缓存未命中、已过期或 offset 越界：回退为首次请求
             offset = 0
 
@@ -530,12 +629,22 @@ def get(
                 "converter": converter,
                 "hint": hint,
             }
-            _set_cache(key, entry)
-            return _paginate(entry, offset, url, format, extract)
+            if cacheable:
+                _set_cache(key, entry)
+            return _paginate(entry, offset, url, format, extract, headers)
     except urllib.error.HTTPError as e:
         return _http_error_dict(e, getattr(e, "_retries", 0))
     except urllib.error.URLError as e:
         return _url_error_dict(e, timeout, getattr(e, "_retries", 0))
+    except _BodyReadError as e:
+        return {"ok": False, "error": str(e), "hint": "可改用 http_download 下载原始内容"}
+    except (http.client.HTTPException, OSError) as e:
+        result = {"ok": False, "error": f"连接中断: {e}"}
+        retried = getattr(e, "_retries", 0)
+        if retried:
+            result["retries"] = retried
+            result["error"] += f"（已自动重试 {retried} 次）"
+        return result
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -572,10 +681,24 @@ def post(
         req = urllib.request.Request(url, data=data, headers=headers or {})
         _add_ua(req, headers)
         with make_opener().open(req, timeout=timeout) as resp:
+            content_type = _resp_content_type(resp)
+            if _is_binary_content_type(content_type):
+                return {
+                    "ok": False,
+                    "error": f"目标是二进制内容 ({content_type})，无法作为文本读取",
+                    "status": resp.status,
+                    "content_type": content_type,
+                    "final_url": _resp_final_url(resp, url),
+                    "hint": "如需保存该文件，请改用 http_download 工具",
+                }
             return _build_response(resp, url)
     except urllib.error.HTTPError as e:
         return _http_error_dict(e)
     except urllib.error.URLError as e:
         return _url_error_dict(e, timeout)
+    except _BodyReadError as e:
+        return {"ok": False, "error": str(e), "hint": "可改用 http_download 下载原始内容"}
+    except (http.client.HTTPException, OSError) as e:
+        return {"ok": False, "error": f"连接中断: {e}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}

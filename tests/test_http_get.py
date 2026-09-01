@@ -36,6 +36,17 @@ def _clear_cache():
     _page_cache.clear()
 
 
+class _CIDict(dict):
+    """模拟 email.message.Message 的大小写不敏感 get（真实响应头行为）。"""
+
+    def get(self, key, default=None):
+        key = key.lower()
+        for k, v in self.items():
+            if k.lower() == key:
+                return v
+        return default
+
+
 class FakeResponse:
     """模拟 urllib response 对象。"""
 
@@ -43,7 +54,7 @@ class FakeResponse:
                  headers: dict | None = None, url: str = ""):
         self._body = BytesIO(body)
         self.status = status
-        self.headers = headers if headers is not None else {}
+        self.headers = _CIDict(headers or {})
         self._url = url
 
     def read(self, n=-1):
@@ -239,7 +250,11 @@ class TestHttpGet:
         assert r2["ok"] is True
         page2 = r2["content"]
         assert page1 != page2  # 内容不应相同
-        assert page2.startswith(page1[next_offset:next_offset + 20])  # 衔接正确
+        # 与缓存中的完整转换结果比对验证衔接（原断言切片恒为空串，是假阳性）
+        key = hg._cache_key("http://example.com", "markdown", False, None)
+        full = hg._page_cache[key]["content"]
+        assert page1 == full[:len(page1)]
+        assert page2 == full[next_offset:next_offset + len(page2)]
 
     def test_format_markdown_no_has_more(self, monkeypatch):
         """短内容不应标记 has_more。"""
@@ -343,7 +358,10 @@ class TestCharsetDetection:
 
     def test_gbk_sniffed_without_charset_header(self, monkeypatch):
         """无 charset 声明时由 chardet/charset_normalizer 嗅探兜底。"""
-        pytest.importorskip("chardet")
+        import importlib.util
+        if not (importlib.util.find_spec("charset_normalizer")
+                or importlib.util.find_spec("chardet")):
+            pytest.skip("需要 charset_normalizer 或 chardet")
         from tools import http_get as hg
 
         def fake_open(self, req, timeout=None):
@@ -527,14 +545,13 @@ class TestRetry:
     def test_no_retry_on_ssrf_redirect_block(self, monkeypatch):
         """SSRF 重定向拦截是安全决策，绝不能重试。"""
         from tools import http_get as hg
+        from tools._http_utils import SsrfBlocked
         self._no_sleep(monkeypatch, hg)
         calls = {"n": 0}
 
         def fake_open(self, req, timeout=None):
             calls["n"] += 1
-            raise urllib.error.URLError(
-                "重定向目标被拦截: 禁止访问内网地址: 127.0.0.1"
-            )
+            raise SsrfBlocked("重定向目标被拦截: 禁止访问内网地址: 127.0.0.1")
 
         monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com")
@@ -721,11 +738,10 @@ class TestErrorHints:
     def test_ssrf_redirect_message_not_disguised(self, monkeypatch):
         """SSRF 拦截不应伪装成'连接失败'。"""
         from tools import http_get as hg
+        from tools._http_utils import SsrfBlocked
 
         def fake_open(self, req, timeout=None):
-            raise urllib.error.URLError(
-                "重定向目标被拦截: 禁止访问内网地址: 127.0.0.1"
-            )
+            raise SsrfBlocked("重定向目标被拦截: 禁止访问内网地址: 127.0.0.1")
 
         monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         r = get("http://example.com")
@@ -816,3 +832,244 @@ class TestTimeoutClamp:
         monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
         get("http://example.com", timeout="abc")
         assert captured["timeout"] == 15
+
+
+class TestRetryConnectionErrors:
+    def test_retry_on_remote_disconnected(self, monkeypatch):
+        """RemoteDisconnected（非 URLError）属瞬时连接错误，应纳入重试。"""
+        import http.client
+        from tools import http_get as hg
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise http.client.RemoteDisconnected("Remote end closed connection")
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is True
+        assert calls["n"] == 3
+
+    def test_connection_reset_exhausted_reports_retries(self, monkeypatch):
+        """持续连接重置：重试耗尽后报错并透传 retries。"""
+        from tools import http_get as hg
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+
+        def fake_open(self, req, timeout=None):
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert r["retries"] == hg._MAX_RETRIES
+        assert "连接中断" in r["error"]
+
+
+class TestOffsetCoercion:
+    def test_offset_string_coerced(self, monkeypatch):
+        """LLM 传字符串 offset 应被容错转换，而非抛 TypeError。"""
+        _clear_cache()
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r1 = get("http://example.com", format="markdown")
+        nxt = r1["next_call"]["params"]["offset"]
+        r2 = get("http://example.com", format="markdown", offset=str(nxt))
+        assert r2["ok"] is True
+        assert r2["offset"] == nxt
+
+    def test_offset_invalid_string_returns_error(self):
+        r = get("http://example.com", offset="abc")
+        assert r["ok"] is False
+        assert "offset" in r["error"]
+
+
+class TestDecompressionSafety:
+    def test_gzip_bomb_bounded(self, monkeypatch):
+        """压缩炸弹：10MB 全同字符（gzip ~10KB），解压必须流式限长。"""
+        import gzip as gz
+        from tools import http_get as hg
+
+        payload = gz.compress(b"A" * (10 * 1024 * 1024))
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(payload, headers={
+                "Content-Type": "text/html", "Content-Encoding": "gzip"})
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="html")
+        assert r["ok"] is True
+        assert r["truncated"] is True
+        assert r["size"] == hg._MAX_RESPONSE_SIZE  # 解压输出被限长在 5MB
+
+    def test_truncated_gzip_returns_partial_not_garbage(self, monkeypatch):
+        """下载截断的 gzip 流：返回已解压部分内容并标记 truncated，而非压缩垃圾。"""
+        import gzip as gz
+        import os
+        from tools import http_get as hg
+
+        payload = gz.compress(os.urandom(6 * 1024 * 1024))  # 不可压缩 → >5MB
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(payload, headers={
+                "Content-Type": "text/plain", "Content-Encoding": "gzip"})
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="html")
+        assert r["ok"] is True
+        assert r["truncated"] is True
+        assert len(r["body"]) > 0
+
+    def test_unsupported_content_encoding_br(self, monkeypatch):
+        """服务器强制 br 编码：明确报错而非返回乱码。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(b"whatever", headers={
+                "Content-Type": "text/html", "Content-Encoding": "br"})
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert "br" in r["error"]
+
+
+class TestCacheCredentialsIsolation:
+    AUTH = {"Authorization": "Bearer SECRET-TOKEN"}
+
+    def test_next_call_carries_headers(self, monkeypatch):
+        """带 headers 的翻页：next_call 必须透传 headers，否则缓存指纹对不上。"""
+        _clear_cache()
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r1 = get("http://example.com", format="markdown", headers=self.AUTH)
+        assert r1["has_more"] is True
+        assert r1["next_call"]["params"].get("headers") == self.AUTH
+
+    def test_authed_pagination_hits_own_cache(self, monkeypatch):
+        """同一凭据的翻页命中自己的缓存，不重复下载。"""
+        _clear_cache()
+        from tools import http_get as hg
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r1 = get("http://example.com", format="markdown", headers=self.AUTH)
+        nxt = r1["next_call"]["params"]["offset"]
+        r2 = get("http://example.com", format="markdown", offset=nxt, headers=self.AUTH)
+        assert r2["ok"] is True
+        assert calls["n"] == 1
+
+    def test_anonymous_cannot_hit_credentialed_cache(self, monkeypatch):
+        """无凭据方翻页不得命中带凭据缓存（跨凭据泄露回归）。"""
+        _clear_cache()
+        from tools import http_get as hg
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r1 = get("http://example.com", format="markdown", headers=self.AUTH)
+        nxt = r1["next_call"]["params"]["offset"]
+        get("http://example.com", format="markdown", offset=nxt)  # 无凭据
+        assert calls["n"] == 2  # 未命中带凭据缓存，重新下载
+
+
+class TestStripTagBlocks:
+    def test_closed_block_removed(self):
+        from tools.http_get import _strip_tag_blocks
+        out = _strip_tag_blocks("<p>1</p><script>var a=1;</script><p>2</p>", "script")
+        assert out == "<p>1</p><p>2</p>"
+
+    def test_unclosed_keeps_content(self):
+        """无闭合标签：只丢开标签、保留后续内容，不误删正文。"""
+        from tools.http_get import _strip_tag_blocks
+        assert _strip_tag_blocks("<p>1</p><script>var a=1;", "script") == "<p>1</p>var a=1;"
+
+    def test_unclosed_flood_is_linear(self):
+        """大量无闭合 <script 不得退化为 O(n·m)（ReDoS 回归）。"""
+        import time
+        from tools.http_get import _strip_tag_blocks
+        html = "<p>x</p>" + "<script " * 20000
+        start = time.monotonic()
+        _strip_tag_blocks(html, "script")
+        assert time.monotonic() - start < 1.0
+
+
+class TestReadLimitedBoundary:
+    def test_exactly_max_bytes_not_truncated(self):
+        from tools import http_get as hg
+        body, truncated = hg._read_limited(FakeResponse(b"x" * hg._MAX_RESPONSE_SIZE))
+        assert truncated is False
+        assert len(body) == hg._MAX_RESPONSE_SIZE
+
+    def test_max_bytes_plus_one_truncated(self):
+        from tools import http_get as hg
+        body, truncated = hg._read_limited(
+            FakeResponse(b"x" * (hg._MAX_RESPONSE_SIZE + 1)))
+        assert truncated is True
+
+
+class TestUserHeadersCaseInsensitive:
+    def test_lowercase_user_headers_not_overridden(self, monkeypatch):
+        """用户传小写 header 名时不应被默认 UA/Accept-Encoding 覆盖。"""
+        from tools import http_get as hg
+        captured = {}
+
+        def fake_open(self, req, timeout=None):
+            captured.update(req.headers)
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        get("http://example.com", format="html",
+            headers={"user-agent": "Mine/1.0", "accept-encoding": "br"})
+        assert captured.get("User-agent") == "Mine/1.0"
+        assert captured.get("Accept-encoding") == "br"
+
+
+class TestHttpError429:
+    def test_429_not_retried_and_hint(self, monkeypatch):
+        """429 不自动重试（对限流无效），hint 措辞与行为一致。"""
+        from tools import http_get as hg
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(
+                "http://example.com", 429, "Too Many Requests", None, None)
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert calls["n"] == 1
+        assert "限流" in r["hint"]
+
+
+class TestPostBinary:
+    def test_post_pdf_rejected_with_hint(self, monkeypatch):
+        """POST 与 GET 一致：二进制响应分流报错。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(b"%PDF-1.4", headers={"Content-Type": "application/pdf"})
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = post("http://example.com/upload", data={"a": 1})
+        assert r["ok"] is False
+        assert "http_download" in r["hint"]

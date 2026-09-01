@@ -2,7 +2,9 @@
 
 import socket
 
-from tools._http_utils import validate_url
+import pytest
+
+from tools._http_utils import SafeRedirectHandler, SsrfBlocked, validate_url
 
 
 class TestValidateUrl:
@@ -51,3 +53,14 @@ class TestValidateUrl:
         err = validate_url("http://localhost/")
         assert err is not None
         assert "127.0.0.1" in err["error"] or "::1" in err["error"]
+
+    def test_redirect_to_private_raises_ssrf_blocked(self):
+        """重定向到内网应抛 SsrfBlocked 专用异常（调用方按类型识别不重试）。"""
+        handler = SafeRedirectHandler()
+        with pytest.raises(SsrfBlocked):
+            handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/x")
+
+    def test_ssrf_blocked_is_url_error(self):
+        """SsrfBlocked 必须是 URLError 子类，保证既有异常处理链路兼容。"""
+        import urllib.error
+        assert issubclass(SsrfBlocked, urllib.error.URLError)
