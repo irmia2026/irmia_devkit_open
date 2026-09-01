@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.6.5 — http_get 健壮性：编码嗅探 / 指数退避重试 / 二进制分流 / final_url
+
+- **http_get 编码嗅探**: 响应体解码从硬编码 UTF-8 改为三级嗅探（Content-Type charset → charset_normalizer → chardet，均为可选降级，兜底 UTF-8），修复 GBK/GB18030 中文站点静默乱码（`errors="replace"` 产生的 `` 属于"成功但内容全毁"的静默错误）。
+- **http_get 指数退避重试**: 新增 `_open_with_retry`，对 5xx 与连接错误（超时/断连）自动重试，默认 2 次、0.5s 起指数退避；4xx 与 SSRF 重定向拦截（安全决策）立即失败不重试。POST 非幂等，明确不重试以避免重复提交。
+- **http_get 二进制分流**: 响应 Content-Type 为 PDF/图片/音视频/压缩包等二进制类型时，不再把字节流当文本 decode 成乱码返回，改为明确报错并附 `hint` 引导改用 http_download。
+- **http_get 可观测性**: 返回新增 `final_url`（重定向后的落地地址，短链展开/跳转调试可用）与 `content_type` 字段，分页缓存条目同步携带。
+- **http_get 截断误报修复**: `_read_limited` 原 `total >= max_bytes` 在恰好等于上限时误报截断，改为多读 1 字节确认。
+- **http_get 翻页缓存前置（正确性）**: 原实现缓存检查在 HTTP 下载之后，翻页时整页重下再丢弃（缓存只省转换不省下载），且翻页瞬间对端宕机/限流时即使缓存完好也直接报错；现翻页请求先查缓存，命中零网络请求直接切片返回。
+- **http_get gzip/deflate 解压**: 自动广告 `Accept-Encoding: gzip, deflate` 并解压响应（服务器强制压缩时原会 decode 出乱码）；解压后再过一次 5MB 截断防压缩炸弹。
+- **http_get 脚本内容剔除**: markdownify 的 `strip` 只去标签不去文本，内联 `<script>/<style>` 源码原会泄漏进转换结果（SPA 页可泄漏数千字符 JS 浪费 token）；现转换前正则剔除整块。
+- **http_get SPA 检测**: 转换后几乎无文本但原始 HTML 含大量脚本时，返回附 `hint` 提示疑似 JS 动态渲染（本工具不执行 JS）并给出替代建议，不再让 LLM 面对"成功但空白"误判。
+- **http_get/http_post 错误可操作化**: HTTP 错误按状态码附排查 hint（401 认证 / 403 反爬 WAF / 404 失效 / 405 方法 / 429 限流 / 5xx 服务端），连接层错误区分 DNS 解析失败/超时（含当前 timeout 值）/拒连；自动重试后仍失败时透传 `retries` 次数；SSRF 拦截不再被"连接失败"前缀伪装成网络故障。
+- **http_get/http_post timeout clamp**: 直接调用也钳制到 1~600s（原仅注册表层对 post 生效），非法值回退默认。
+- **db_query**: params schema 补 `items`（数组类型缺 items 导致 Gemini function calling 400 INVALID_ARGUMENT，43004d6）。
+
 ## v2.6.4 — 全量 code review 修复：响应协议 / 备份生命周期 / 行号寻址编辑 / CI 日志
 
 - **safe_edit 行号寻址**: 新增 `mode=insert_at_line`（`line` 后插入，`0`=文件开头）/ `delete_lines`（`start_line~end_line` 闭区间删除），走完整备份→语法检查→回滚链路；参数 `preserve_inner_indent` 更名 `align_whitespace`（语义不变）。

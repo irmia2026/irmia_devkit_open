@@ -4,8 +4,13 @@ Tests error paths (invalid URLs, private IPs) without real network.
 Use monkeypatch to avoid actual HTTP calls.
 """
 
+import socket
+import urllib.error
 import urllib.request
 from io import BytesIO
+
+import pytest
+
 from tools.http_get import get, post
 
 
@@ -34,12 +39,18 @@ def _clear_cache():
 class FakeResponse:
     """模拟 urllib response 对象。"""
 
-    def __init__(self, body: bytes, status: int = 200):
+    def __init__(self, body: bytes, status: int = 200,
+                 headers: dict | None = None, url: str = ""):
         self._body = BytesIO(body)
         self.status = status
+        self.headers = headers if headers is not None else {}
+        self._url = url
 
     def read(self, n=-1):
         return self._body.read(n)
+
+    def geturl(self):
+        return self._url
 
     def __enter__(self):
         return self
@@ -304,3 +315,504 @@ class TestHttpPost:
         r = post("http://example.com/api", data={"key": "value"})
         # mock 返回 200 响应
         assert r["ok"] is True
+
+
+# GBK 编码的中文页面，用于测试编码嗅探
+GBK_HTML = (
+    "<html><head><title>中文标题</title></head><body><p>"
+    + "这是一段用于测试编码嗅探的中文内容。" * 10
+    + "</p></body></html>"
+).encode("gbk")
+
+
+class TestCharsetDetection:
+    def test_gbk_via_content_type_header(self, monkeypatch):
+        """Content-Type 声明 charset=gbk 时应按 GBK 解码，不产生乱码。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(
+                GBK_HTML, headers={"Content-Type": "text/html; charset=gbk"}
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert "中文内容" in r["content"]
+        assert "\ufffd" not in r["content"]
+
+    def test_gbk_sniffed_without_charset_header(self, monkeypatch):
+        """无 charset 声明时由 chardet/charset_normalizer 嗅探兜底。"""
+        pytest.importorskip("chardet")
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(GBK_HTML, headers={"Content-Type": "text/html"})
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert "中文内容" in r["content"]
+
+    def test_invalid_charset_falls_back_to_utf8(self, monkeypatch):
+        """无法识别的 charset 名不应崩溃，回退 utf-8。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(
+                SAMPLE_HTML.encode("utf-8"),
+                headers={"Content-Type": "text/html; charset=not-a-real-charset"},
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert "Hello World" in r["content"]
+
+
+class TestBinaryContent:
+    def test_pdf_rejected_with_hint(self, monkeypatch):
+        """PDF 应返回明确错误并引导改用 http_download。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(
+                b"%PDF-1.4 fake", headers={"Content-Type": "application/pdf"}
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com/doc.pdf")
+        assert r["ok"] is False
+        assert r["status"] == 200
+        assert r["content_type"] == "application/pdf"
+        assert "http_download" in r["hint"]
+        assert "final_url" in r
+
+    def test_image_rejected(self, monkeypatch):
+        """图片 Content-Type 同样分流。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(
+                b"\x89PNG\r\n", headers={"Content-Type": "image/png"}
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com/pic.png")
+        assert r["ok"] is False
+        assert "http_download" in r["hint"]
+
+    def test_json_not_treated_as_binary(self, monkeypatch):
+        """application/json 是文本 API 响应，不应被分流。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(
+                b'{"a": 1}',
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com/api", format="text")
+        assert r["ok"] is True
+        assert '"a"' in r["content"]
+
+
+class TestFinalUrl:
+    def test_final_url_from_redirect(self, monkeypatch):
+        """重定向后应返回落地 URL。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(
+                SAMPLE_HTML.encode("utf-8"), url="http://example.com/landing"
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com/start")
+        assert r["ok"] is True
+        assert r["final_url"] == "http://example.com/landing"
+
+    def test_final_url_fallback_to_request_url(self, monkeypatch):
+        """取不到落地 URL 时回退为原始请求 URL。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com/page")
+        assert r["ok"] is True
+        assert r["final_url"] == "http://example.com/page"
+
+
+class TestRetry:
+    @staticmethod
+    def _no_sleep(monkeypatch, hg):
+        """跳过退避等待，加速测试。"""
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+
+    def test_retry_on_5xx_then_success(self, monkeypatch):
+        """首次 503 应重试并最终成功。"""
+        from tools import http_get as hg
+        self._no_sleep(monkeypatch, hg)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.HTTPError(
+                    "http://example.com", 503, "Service Unavailable", None, None
+                )
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is True
+        assert calls["n"] == 2
+
+    def test_retry_exhausted_on_persistent_5xx(self, monkeypatch):
+        """持续 503 重试耗尽后返回错误，请求次数 = 1 + _MAX_RETRIES。"""
+        from tools import http_get as hg
+        self._no_sleep(monkeypatch, hg)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(
+                "http://example.com", 503, "Service Unavailable", None, None
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert r["status"] == 503
+        assert calls["n"] == 1 + hg._MAX_RETRIES
+
+    def test_no_retry_on_4xx(self, monkeypatch):
+        """404 属客户端错误，不应重试。"""
+        from tools import http_get as hg
+        self._no_sleep(monkeypatch, hg)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(
+                "http://example.com", 404, "Not Found", None, None
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert r["status"] == 404
+        assert calls["n"] == 1
+
+    def test_retry_on_connection_error(self, monkeypatch):
+        """连接超时属瞬时错误，应重试。"""
+        from tools import http_get as hg
+        self._no_sleep(monkeypatch, hg)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.URLError("timed out")
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is True
+        assert calls["n"] == 2
+
+    def test_no_retry_on_ssrf_redirect_block(self, monkeypatch):
+        """SSRF 重定向拦截是安全决策，绝不能重试。"""
+        from tools import http_get as hg
+        self._no_sleep(monkeypatch, hg)
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            raise urllib.error.URLError(
+                "重定向目标被拦截: 禁止访问内网地址: 127.0.0.1"
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert calls["n"] == 1
+
+
+class TestPaginationCache:
+    def test_pagination_serves_from_cache_without_redownload(self, monkeypatch):
+        """翻页命中缓存时不应再次发起网络请求（整个翻页周期只下载一次）。"""
+        _clear_cache()
+        from tools import http_get as hg
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r1 = get("http://example.com", format="markdown")
+        assert r1["has_more"] is True
+        next_offset = r1["next_call"]["params"]["offset"]
+
+        r2 = get("http://example.com", format="markdown", offset=next_offset)
+        assert r2["ok"] is True
+        assert r2["content"] != r1["content"]
+        assert calls["n"] == 1  # 关键断言：翻页零网络请求
+
+    def test_pagination_cache_survives_network_failure(self, monkeypatch):
+        """翻页时对端宕机/网络断开，缓存命中仍应正常返回。"""
+        _clear_cache()
+        from tools import http_get as hg
+        calls = {"n": 0}
+
+        def fake_open(self, req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise urllib.error.URLError("connection refused")
+            return FakeResponse(SAMPLE_HTML_LONG.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+        r1 = get("http://example.com", format="markdown")
+        next_offset = r1["next_call"]["params"]["offset"]
+
+        r2 = get("http://example.com", format="markdown", offset=next_offset)
+        assert r2["ok"] is True  # 网络已"断"，但缓存兜底
+        assert r2["offset"] == next_offset
+        assert len(r2["content"]) > 0
+        assert calls["n"] == 1  # 缓存命中，未触发第二次（必失败的）请求
+
+
+# 模拟 SPA 页面：大量脚本 + 几乎无文本
+SPA_HTML = (
+    '<html><head><title>SPA</title></head><body><div id="app"></div>'
+    "<script>" + "var x = 1; " * 400 + "</script></body></html>"
+)
+
+
+class TestCompression:
+    def test_gzip_body_decompressed(self, monkeypatch):
+        """Content-Encoding: gzip 的响应应自动解压。"""
+        import gzip as gz
+        from tools import http_get as hg
+
+        payload = gz.compress(SAMPLE_HTML.encode("utf-8"))
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(payload, headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Content-Encoding": "gzip",
+            })
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="html")
+        assert r["ok"] is True
+        assert "<h1>Hello World</h1>" in r["body"]
+
+    def test_deflate_body_decompressed(self, monkeypatch):
+        """Content-Encoding: deflate 的响应应自动解压。"""
+        import zlib
+        from tools import http_get as hg
+
+        payload = zlib.compress(SAMPLE_HTML.encode("utf-8"))
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(payload, headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Content-Encoding": "deflate",
+            })
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="html")
+        assert r["ok"] is True
+        assert "<h1>Hello World</h1>" in r["body"]
+
+    def test_gzip_requested_via_accept_encoding(self, monkeypatch):
+        """未自定义 headers 时应自动广告 Accept-Encoding: gzip。"""
+        from tools import http_get as hg
+        captured = {}
+
+        def fake_open(self, req, timeout=None):
+            captured["ae"] = req.headers.get("Accept-encoding")  # urllib 首字母大写
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        get("http://example.com", format="html")
+        assert captured["ae"] is not None
+        assert "gzip" in captured["ae"]
+
+
+class TestErrorHints:
+    def test_404_hint(self, monkeypatch):
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            raise urllib.error.HTTPError(
+                "http://example.com", 404, "Not Found", None, None
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com/missing")
+        assert r["ok"] is False
+        assert r["status"] == 404
+        assert "不存在" in r["hint"]
+        assert "retries" not in r  # 4xx 不重试
+
+    def test_403_hint_mentions_antibot(self, monkeypatch):
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            raise urllib.error.HTTPError(
+                "http://example.com", 403, "Forbidden", None, None
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert "反爬" in r["hint"]
+
+    def test_5xx_exhausted_reports_retries(self, monkeypatch):
+        from tools import http_get as hg
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+
+        def fake_open(self, req, timeout=None):
+            raise urllib.error.HTTPError(
+                "http://example.com", 503, "Service Unavailable", None, None
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert r["retries"] == hg._MAX_RETRIES
+        assert "已自动重试" in r["error"]
+        assert "服务端错误" in r["hint"]
+
+    def test_timeout_hint(self, monkeypatch):
+        from tools import http_get as hg
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+
+        def fake_open(self, req, timeout=None):
+            raise urllib.error.URLError(TimeoutError("timed out"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", timeout=7)
+        assert r["ok"] is False
+        assert "timeout=7" in r["hint"]
+        assert r["retries"] == hg._MAX_RETRIES
+
+    def test_dns_hint(self, monkeypatch):
+        from tools import http_get as hg
+        monkeypatch.setattr(hg, "_RETRY_BACKOFF", 0)
+
+        def fake_open(self, req, timeout=None):
+            raise urllib.error.URLError(
+                socket.gaierror(-2, "Name or service not known")
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert "域名解析失败" in r["hint"]
+
+    def test_ssrf_redirect_message_not_disguised(self, monkeypatch):
+        """SSRF 拦截不应伪装成'连接失败'。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            raise urllib.error.URLError(
+                "重定向目标被拦截: 禁止访问内网地址: 127.0.0.1"
+            )
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com")
+        assert r["ok"] is False
+        assert r["error"].startswith("重定向目标被拦截")
+        assert "连接失败" not in r["error"]
+
+
+class TestJsRenderedHint:
+    def test_script_content_not_leaked(self, monkeypatch):
+        """内联脚本源码不应泄漏进转换结果（markdownify strip 只去标签）。"""
+        _clear_cache()
+        from tools import http_get as hg
+        html = (
+            "<html><body><p>真正的正文内容在这里。</p>"
+            "<script>var tracker = 'x'; " * 100 + "</script></body></html>"
+        )
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(html.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert "真正的正文内容" in r["content"]
+        assert "tracker" not in r["content"]
+
+    def test_spa_page_gets_hint(self, monkeypatch):
+        """大量脚本 + 几乎无文本的页面应提示疑似 JS 渲染。"""
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SPA_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert "hint" in r
+        assert "JS" in r["hint"]
+
+    def test_normal_page_no_hint(self, monkeypatch):
+        """正常文本页面不应误报。"""
+        _clear_cache()
+        from tools import http_get as hg
+
+        def fake_open(self, req, timeout=None):
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        r = get("http://example.com", format="markdown")
+        assert r["ok"] is True
+        assert "hint" not in r
+
+
+class TestTimeoutClamp:
+    def test_timeout_clamped_to_600(self, monkeypatch):
+        from tools import http_get as hg
+        captured = {}
+
+        def fake_open(self, req, timeout=None):
+            captured["timeout"] = timeout
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        get("http://example.com", timeout=9999)
+        assert captured["timeout"] == 600
+
+    def test_timeout_floor_is_1(self, monkeypatch):
+        from tools import http_get as hg
+        captured = {}
+
+        def fake_open(self, req, timeout=None):
+            captured["timeout"] = timeout
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        get("http://example.com", timeout=-3)
+        assert captured["timeout"] == 1
+
+    def test_timeout_invalid_uses_default(self, monkeypatch):
+        from tools import http_get as hg
+        captured = {}
+
+        def fake_open(self, req, timeout=None):
+            captured["timeout"] = timeout
+            return FakeResponse(SAMPLE_HTML.encode("utf-8"))
+
+        monkeypatch.setattr(hg, "make_opener", lambda: _fake_opener(fake_open))
+        get("http://example.com", timeout="abc")
+        assert captured["timeout"] == 15

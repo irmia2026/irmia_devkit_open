@@ -605,7 +605,7 @@ RgSearchTool = make_tool(
 
 HttpGetTool = make_tool(
     "http_get",
-    "【HTTP GET 唯一选择】HTTP GET 请求 + 智能内容转换。不要用 astrbot_execute_shell 跑 curl——它无 SSRF（内网 IP）防护。默认 format='markdown' 转为 LLM 友好 Markdown 并支持 offset 分页翻页；format='text' 提取纯文本正文；format='html' 返回原始 HTML（5000 字符截断，无分页，仅调试用）。extract=true 先提取正文再转换（trafilatura 去广告/导航/页脚），默认 false 全页转换。15s 超时。",
+    "【HTTP GET 唯一选择】HTTP GET 请求 + 智能内容转换。不要用 astrbot_execute_shell 跑 curl——它无 SSRF（内网 IP）防护。默认 format='markdown' 转为 LLM 友好 Markdown 并支持 offset 分页翻页；format='text' 提取纯文本正文；format='html' 返回原始 HTML（5000 字符截断，无分页，仅调试用）。extract=true 先提取正文再转换（trafilatura 去广告/导航/页脚），默认 false 全页转换。15s 超时。自动编码嗅探（GBK 等老站不乱码）、gzip/deflate 自动解压；5xx/连接错误自动指数退避重试；返回含 final_url（重定向后落地地址）与 content_type；错误附排查 hint（如 403 反爬、超时、DNS）；目标为 PDF/图片等二进制内容时返回错误并提示改用 http_download。",
     {
             "type": "object",
             "properties": {

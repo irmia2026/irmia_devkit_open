@@ -2,7 +2,7 @@ name: astrbot_plugin_irmia_devkit
 display_name: 弥亚开发工具箱
 desc: 为 Agent 提供实用且安全的开发工具 — 备份/语法检查/回滚，65 工具 + 1 Skill
 author: 伊尔弥亚
-version: 2.6.4
+version: 2.6.5
 repo: https://github.com/irmia2026/irmia_devkit_open
 short_desc: 安全代码编辑 — 备份/语法检查/回滚，65 工具 + 1 Skill
 astrbot_version: ">=4.16"
