@@ -5,8 +5,13 @@ _http_utils — HTTP 安全校验共享代码。
 
 import ipaddress
 import socket
+import urllib.error
 import urllib.request
 from urllib.parse import urlparse
+
+
+class SsrfBlocked(urllib.error.URLError):
+    """SSRF 重定向拦截专用异常——调用方按类型识别，不依赖消息文案。"""
 
 _PRIVATE_NETS = [
     ipaddress.ip_network("127.0.0.0/8"),
@@ -67,7 +72,7 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         err = validate_url(newurl)
         if err:
-            raise urllib.error.URLError(f"重定向目标被拦截: {err['error']}")
+            raise SsrfBlocked(f"重定向目标被拦截: {err['error']}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
