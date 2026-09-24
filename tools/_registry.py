@@ -232,7 +232,7 @@ def _port_check_w(host: str = "127.0.0.1", ports: list | None = None) -> dict:
 
 SafeEditTool = make_tool(
     "safe_edit",
-    "【改代码文件唯一选择】安全编辑：自动备份→精确替换→语法检查→通过保留/失败自动回滚。支持 .py/.nim/.go/.js/.ts（语法检查）+ 其他扩展名（跳过语法检查）。不要用 file_write 改已有代码（无备份无回滚）。不要用 astrbot_file_edit_tool 改代码（无备份无语法检查）。非代码文件（.md/.txt/.json）可以用 file_patch 或 safe_edit，两者均可。单文件单改优选；跨文件批量/同一文件多改 → 用 multi_edit（原子提交，继承本工具的空白容错能力）。当 old 文本在文件中多处匹配时，工具会报错并列出所有位置——用 occurrence=N 指定第几次出现继续。mode: replace(默认，old/new 文本替换，old 误带 safe_read 行号前缀会自动剥除) / insert_at_line(在 line 行后插入 new，line=0 为文件开头，无需 old) / delete_lines(删除 start_line~end_line 闭区间行，无需 old)。已知行号时优先用行号模式，免去复制文本。",
+    "【改代码文件唯一选择】安全编辑：自动备份→精确替换→语法检查→通过保留/失败自动回滚。支持 .py/.nim/.go/.js/.ts/.rs/.java/.c/.cpp/.php/.ps1/.sh/.json/.toml/.yaml 等（语法检查）+ 其他扩展名（跳过语法检查）。不要用 file_write 改已有代码（无备份无回滚）。不要用 astrbot_file_edit_tool 改代码（无备份无语法检查）。非代码文件（.md/.txt/.json）可以用 file_patch 或 safe_edit，两者均可。单文件单改优选；跨文件批量/同一文件多改 → 用 multi_edit（原子提交，继承本工具的空白容错能力）。当 old 文本在文件中多处匹配时，工具会报错并列出所有位置——用 occurrence=N 指定第几次出现继续。mode: replace(默认，old/new 文本替换，old 误带 safe_read 行号前缀会自动剥除) / insert_at_line(在 line 行后插入 new，line=0 为文件开头，无需 old) / delete_lines(删除 start_line~end_line 闭区间行，无需 old)。已知行号时优先用行号模式，免去复制文本。",
     {
             "type": "object",
             "properties": {
@@ -382,7 +382,7 @@ FilePreviewTool = make_tool(
 
 SyntaxCheckTool = make_tool(
     "syntax_check",
-    "检查代码文件语法。支持 Python/Nim/Go/JS/TS。safe_edit 内部会自动调用它，所以通常不需要手动调。仅在用 file_patch 手动改完代码后，才需要手动调此工具验证。",
+    "检查代码文件语法。支持 Python/Nim/Go/JS/TS/Rust/Java/C/C++/PHP/PowerShell/Shell 与 JSON/TOML/YAML。工具链缺失时返回 skipped 降级不阻塞。safe_edit 内部会自动调用它，所以通常不需要手动调。仅在用 file_patch 手动改完代码后，才需要手动调此工具验证。",
     {
             "type": "object",
             "properties": {

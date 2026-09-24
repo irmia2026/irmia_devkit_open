@@ -52,7 +52,7 @@ irmia_devkit_open/
     ├── safe_edit.py             # Backup → replace → syntax check → auto-rollback
     ├── safe_write.py            # New file / overwrite with syntax check
     ├── file_patch.py            # Exact text replacement + preview
-    ├── syntax_check.py          # Multi-language syntax (Python/Nim/Go/JS/TS)
+    ├── syntax_check.py          # Multi-language syntax (Python/Nim/Go/JS/TS/Rust/Java/C/C++/PHP/PS1/SH + JSON/TOML/YAML)
     ├── lint_runner.py           # ruff/pylint/eslint with auto-fallback
     ├── test_runner.py           # pytest/go/cargo/jest unified runner
     ├── multi_edit.py            # Atomic multi-file edit coordinator

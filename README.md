@@ -30,7 +30,7 @@ Python ≥ 3.10
 | `es_search` | Everything + es.exe (Windows) / locate / fd | 返回错误提示或 Python os.walk 扫描 |
 | `gh_pr` / `gh_issue` / `gh_release` / `gh_repo` | GitHub CLI | 返回错误提示 |
 | `html_extract` | `beautifulsoup4`，lxml 可选 | 缺 bs4 报错，缺 lxml 回退 html.parser |
-| `syntax_check` (Nim/Go/JS/TS) | 对应编译器 | 跳过 (skipped=true) |
+| `syntax_check` (Nim/Go/JS/TS/Rust/Java/C/C++/PHP/PS1/SH) | 对应编译器/运行时；YAML 需 pyyaml，Python<3.11 查 TOML 需 tomli | 跳过 (skipped=true) |
 | `lint_runner` | ruff / pylint / eslint 任一（自动 fallback） | 返回安装提示 |
 | `rg_search` | ripgrep（可选），未安装时 Python fallback | 降级到纯标库扫描 |
 | `config_diff` (YAML) | pyyaml（可选） | 返回安装提示 |
@@ -71,7 +71,7 @@ Python ≥ 3.10
 | `safe_backups` | 列出备份文件（自动保留策略：每文件 10 份 + 500MB LRU） |
 | `file_patch` | 精确文本替换，非代码文件用，支持 occurrence 消歧 |
 | `file_preview` | 预览替换效果 (dry-run diff) |
-| `syntax_check` | Python / Nim / Go / JS / TS 语法 |
+| `syntax_check` | Python / Nim / Go / JS / TS / Rust / Java / C / C++ / PHP / PowerShell / Shell + JSON / TOML / YAML |
 | `lint_runner` | ruff / pylint / eslint 代码质量 |
 | `test_runner` | pytest / go test / cargo test / jest 统一运行 |
 | `multi_edit` | 原子多文件编辑，失败全量回滚 |

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **syntax_check 多语言扩展**: 新增 Rust（rustfmt --emit stdout 纯解析，规避 --check 把格式差异误判为失败）/ Java（javac -XDshould-stop.at=PARSE 只解析不语义分析，规避临时文件名与 public 类名不匹配等误报，不识该选项的老 JDK 自动回退常规编译）/ C/C++（gcc/clang -fsyntax-only，MSVC cl /Zs 兑底；实测 MinGW gcc 不认 `--` 终止符，统一不加）/ PHP（php -l）/ PowerShell（Parser.ParseFile 纯解析不执行，pwsh 7 优先回退 powershell 5）/ Shell（bash -n stdin 模式规避 WSL 不认 Windows 路径；WSL 启动器在 PATH 但后端损坏的场景可用性自检+按路径缓存，不误报语法错误）/ JSON（标准库，错误带行列号）/ TOML（tomllib，Python 3.10 回退 tomli）/ YAML（PyYAML compose 纯语法层）；路由改为扩展名→检查器调度表；工具链缺失统一 skipped=true 降级不阻塞编辑链路。
+
 ## v2.6.5 — http_get 健壮性：编码嗅探 / 指数退避重试 / 二进制分流 / final_url
 
 - **http_get 编码嗅探**: 响应体解码从硬编码 UTF-8 改为三级嗅探（Content-Type charset → charset_normalizer → chardet，均为可选降级，兜底 UTF-8），修复 GBK/GB18030 中文站点静默乱码（`errors="replace"` 产生的 `` 属于"成功但内容全毁"的静默错误）。

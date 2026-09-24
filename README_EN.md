@@ -32,7 +32,7 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 | `es_search` | Everything + es.exe (Windows) / locate / fd | Returns error or Python os.walk scan |
 | `gh_pr` / `gh_issue` / `gh_release` / `gh_repo` | GitHub CLI | Returns error |
 | `html_extract` | `beautifulsoup4`, lxml optional | bs4 required, lxml falls back to html.parser |
-| `syntax_check` (Nim/Go/JS/TS) | Respective compilers | Skipped (skipped=true) |
+| `syntax_check` (Nim/Go/JS/TS/Rust/Java/C/C++/PHP/PS1/SH) | Respective toolchains; YAML needs pyyaml, TOML on Python<3.11 needs tomli | Skipped (skipped=true) |
 | `lint_runner` | ruff / pylint / eslint (auto-fallback) | Returns install hint |
 | `rg_search` | ripgrep (optional, Python fallback) | Falls back to stdlib scan |
 | `config_diff` (YAML) | pyyaml (optional) | Returns install hint |
@@ -64,7 +64,7 @@ Place the plugin folder into AstrBot's `data/plugins/` directory and restart Ast
 | `safe_backups` | List backup files (auto retention: 10 per file + 500MB LRU) |
 | `file_patch` | Exact text replacement for non-code files, occurrence disambiguation |
 | `file_preview` | Preview replacement effect (dry-run diff) |
-| `syntax_check` | Syntax check for Python / Nim / Go / JS / TS |
+| `syntax_check` | Syntax check for Python / Nim / Go / JS / TS / Rust / Java / C / C++ / PHP / PowerShell / Shell + JSON / TOML / YAML |
 | `lint_runner` | Code quality check (ruff / pylint / eslint with auto-fallback) |
 | `test_runner` | Unified pytest / go test / cargo test / jest runner |
 | `multi_edit` | Atomic multi-file editing with full rollback |
