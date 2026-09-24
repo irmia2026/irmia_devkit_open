@@ -3,30 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>弥亚开发工具箱 配置台</title>
+  <title>弥亚工具箱</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./styles.css?v=20260924_review_fixes" />
-  <script>
-    (() => {
-      const key = "irmia_devkit_card_transparency";
-      const clamp = value => Math.min(95, Math.max(0, Math.round(Number(value) || 18)));
-      let value = 18;
-      try { value = clamp(localStorage.getItem(key) || value); } catch { value = 18; }
-      const alpha = Math.max(0.04, 1 - (value / 100));
-      const shellAlpha = Math.max(0.05, Math.min(0.95, alpha * 0.88));
-      const softAlpha = Math.max(0.03, Math.min(0.9, alpha * 0.72));
-      const mutedAlpha = Math.max(0.02, Math.min(0.82, alpha * 0.58));
-      const blur = value >= 88 ? 0 : Math.max(0, Math.round(18 * (1 - value / 100)));
-      const root = document.documentElement;
-      root.style.setProperty("--card-alpha", alpha.toFixed(2));
-      root.style.setProperty("--card-shell-alpha", shellAlpha.toFixed(2));
-      root.style.setProperty("--card-soft-alpha", softAlpha.toFixed(2));
-      root.style.setProperty("--card-muted-alpha", mutedAlpha.toFixed(2));
-      root.style.setProperty("--card-blur", `${blur}px`);
-      root.dataset.cardTransparency = value >= 88 ? "high" : (value >= 55 ? "medium" : "low");
-      window.__IRMIA_INITIAL_CARD_TRANSPARENCY__ = value;
-    })();
-  </script>
+  <link rel="stylesheet" href="./styles.css?v=20260924_backup_parallel" />
 </head>
 <body>
   <div class="startup-loader" id="startupLoader" aria-live="polite">
@@ -35,16 +14,14 @@
     </div>
     <div class="startup-loader-copy">
       <strong id="startupLoaderTitle">读取配置</strong>
-      <small id="startupLoaderDetail">正在加载工具与权限配置</small>
     </div>
   </div>
   <div class="dashboard-shell">
-    <aside class="sidebar" aria-label="弥亚开发工具箱 导航">
+    <aside class="sidebar" aria-label="配置导航">
       <section class="brand-panel">
         <img class="brand-logo" src="./brand_logo.png?v=20260619_devkit_logo_sync" alt="弥亚开发工具箱 Logo" />
         <div class="brand-copy">
-          <span>Agency</span>
-          <h1>弥亚开发工具箱</h1>
+          <h1>弥亚工具箱</h1>
         </div>
         <button id="refreshGroupsBtn" class="icon-button" type="button" title="刷新群聊和私聊列表" aria-label="刷新群聊和私聊列表">
           <span aria-hidden="true">↻</span>
@@ -53,56 +30,29 @@
 
       <nav class="menu-stack" aria-label="页面定位">
         <div class="menu-group">
-          <p>Main Menu</p>
-          <button class="menu-item nav-jump active" type="button" data-jump="overview"><span aria-hidden="true">▣</span>总览</button>
           <button class="menu-item nav-jump" type="button" data-jump="tools"><span aria-hidden="true">☷</span>工具开关</button>
-          <button class="menu-item nav-jump" type="button" data-jump="paths"><span aria-hidden="true">⌘</span>路径选项</button>
-        </div>
-        <div class="menu-group">
-          <p>Management</p>
-          <button class="menu-item nav-jump" type="button" data-jump="admins"><span aria-hidden="true">◌</span>权限管理</button>
-          <button class="menu-item nav-jump" type="button" data-jump="groups"><span aria-hidden="true">◍</span>工具分组</button>
+          <button class="menu-item nav-jump active" type="button" data-jump="admins"><span aria-hidden="true">◌</span>权限管理</button>
         </div>
       </nav>
 
-      <section class="contact-summary" aria-label="对象数量">
-        <div><strong id="groupCountLabel">0</strong><span>群聊</span></div>
-        <div><strong id="privateCountLabel">0</strong><span>私聊</span></div>
-      </section>
-
       <div class="group-list" id="groupList"></div>
-
-      <section class="sidebar-footer" aria-label="当前配置说明">
-        <div class="operator-avatar">ID</div>
-        <div>
-          <strong>配置控制台</strong>
-          <span>工具组与单工具权限</span>
-        </div>
-      </section>
     </aside>
 
     <main class="dashboard-main">
       <header class="topbar">
-        <div class="breadcrumb"><span>Dashboard</span><b>›</b><strong>Overview</strong></div>
         <label class="search-box" for="dashboardSearch">
           <span aria-hidden="true">⌕</span>
           <input id="dashboardSearch" type="search" placeholder="搜索工具、分组或配置对象..." autocomplete="off" />
-          <kbd>⌘ K</kbd>
         </label>
         <div class="top-actions">
-          <button id="paletteToggleBtn" class="toolbar-button" type="button" title="切换配色">
-            <span>配色</span><b id="paletteModeLabel">石墨</b>
+          <button id="paletteToggleBtn" class="toolbar-button" type="button" title="切换配色" aria-label="切换配色">
+            <span>配色：</span><b id="paletteModeLabel">石墨</b>
           </button>
-          <button id="appearanceToggleBtn" class="toolbar-button" type="button" title="切换明暗模式">
-            <span>明暗</span><b id="appearanceModeLabel">自动</b>
+          <button id="appearanceToggleBtn" class="toolbar-button" type="button" title="切换主题" aria-label="切换主题">
+            <span>主题：</span><b id="appearanceModeLabel">自动</b>
           </button>
-          <label class="toolbar-range" title="配置卡片透明度">
-            <span>卡片</span>
-            <input id="cardTransparencyInput" type="range" min="0" max="95" step="1" value="18" aria-label="配置卡片透明度">
-            <b id="cardTransparencyLabel">18%</b>
-          </label>
-          <button id="soundFeedbackBtn" class="toolbar-button" type="button" title="切换按钮音效" aria-label="切换按钮音效" aria-pressed="true">
-            <span>按钮音效</span><b id="soundFeedbackLabel">开启</b>
+          <button id="soundFeedbackBtn" class="toolbar-button" type="button" title="音效：开" aria-label="音效：开" aria-pressed="true">
+            <span>音效：</span><b id="soundFeedbackLabel">开</b>
           </button>
         </div>
       </header>
@@ -110,8 +60,8 @@
       <section class="empty-state" id="emptyState">
         <div class="empty-card">
           <div class="empty-mark">IR</div>
-          <h2>选择一个配置对象</h2>
-          <p>从左侧选择全局、群聊或私聊后，可以管理工具组、单工具开关、管理员和外部路径。</p>
+          <h2>选择配置对象</h2>
+          <p>从左侧选择全局、群聊或私聊。</p>
         </div>
       </section>
 
@@ -132,16 +82,6 @@
     </div>
   </div>
 
-  <script>
-    (() => {
-      const value = window.__IRMIA_INITIAL_CARD_TRANSPARENCY__;
-      if (!Number.isFinite(value)) return;
-      const input = document.getElementById("cardTransparencyInput");
-      const label = document.getElementById("cardTransparencyLabel");
-      if (input) input.value = String(value);
-      if (label) label.textContent = `${value}%`;
-    })();
-  </script>
-  <script type="module" src="./app.js?v=20260924_review_fixes"></script>
+  <script type="module" src="./app.js?v=20260924_nav_palette"></script>
 </body>
 </html>

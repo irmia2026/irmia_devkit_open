@@ -4,21 +4,16 @@ let bridge = window.AstrBotPluginPage;
 
 const PALETTE_KEY = "irmia_devkit_palette_mode";
 const APPEARANCE_KEY = "irmia_devkit_appearance_mode";
-const CARD_TRANSPARENCY_KEY = "irmia_devkit_card_transparency";
-const PALETTE_MODES = ["luxury", "bluewhite", "vivid", "void"];
+const PALETTE_MODES = ["luxury", "bluewhite", "vivid"];
 const APPEARANCE_MODES = ["auto", "dark", "light"];
-const PALETTE_LABELS = { luxury: "石墨", bluewhite: "晴空", vivid: "珊瑚", void: "夜色" };
+const PALETTE_LABELS = { luxury: "石墨", bluewhite: "晴空", vivid: "珊瑚" };
 const APPEARANCE_LABELS = { auto: "自动", dark: "深色", light: "浅色" };
-const DEFAULT_CARD_TRANSPARENCY = 18;
-const CARD_TRANSPARENCY_MAX = 95;
 
 let paletteMode = "luxury";
 let appearanceMode = "auto";
 let uiSoundEnabled = true;
-let cardTransparency = DEFAULT_CARD_TRANSPARENCY;
 let audioUnlocked = false;
 let audioContext = null;
-let cardTransparencySaveTimer = 0;
 let api = null;
 let toolGroupsDef = {};
 let groupsData = [];
@@ -29,11 +24,10 @@ let groupRequestId = 0;
 let globalAdminIds = [];
 let pathOptions = { es_path: "", gh_path: "", backup_dir: "" };
 let searchTerm = "";
-let activeGroupFilter = "all";
+let activeGroupFilter = "";
 let chartMode = "live";
-let breakdownExpanded = false;
 
-const collapsedMenus = { groups: false, contacts: false };
+const collapsedMenus = { groups: true, contacts: true };
 const DEFAULT_GROUP = {
   id: "__default__",
   name: "全局配置",
@@ -141,6 +135,25 @@ function iconForName(name) {
   return text.replace(/[^A-Za-z0-9\u4e00-\u9fa5]/g, "").slice(0, 2).toUpperCase() || "TL";
 }
 
+function chartGroupLabel(name) {
+  if (/安全编辑/.test(name)) return "编辑";
+  if (/执行与审计/.test(name)) return "审计";
+  if (/编码\/时间/.test(name)) return "编码";
+  if (/代码理解/.test(name)) return "代码";
+  const labels = {
+    FI: "文件",
+    GH: "GIT",
+    TX: "文本",
+    CD: "代码",
+    OS: "系统",
+    NW: "网络",
+    DB: "数据",
+    IM: "图片",
+  };
+  const icon = iconForName(name);
+  return labels[icon] || String(name || "分组").slice(0, 2);
+}
+
 function asToolItems(tools) {
   if (!Array.isArray(tools)) return [];
   return tools.map(item => {
@@ -177,10 +190,6 @@ function saveAppearanceLocally(mode) {
   try { localStorage.setItem(APPEARANCE_KEY, mode); } catch { /* ignore */ }
 }
 
-function saveCardTransparencyLocally(value = cardTransparency) {
-  try { localStorage.setItem(CARD_TRANSPARENCY_KEY, String(clampCardTransparency(value))); } catch { /* ignore */ }
-}
-
 function getStoredPaletteMode() {
   let saved = paletteMode || "luxury";
   try { saved = localStorage.getItem(PALETTE_KEY) || saved; } catch { /* ignore */ }
@@ -195,45 +204,9 @@ function getStoredAppearanceMode() {
   return appearanceMode;
 }
 
-function getStoredCardTransparency() {
-  let saved = cardTransparency || DEFAULT_CARD_TRANSPARENCY;
-  try { saved = localStorage.getItem(CARD_TRANSPARENCY_KEY) || saved; } catch { /* ignore */ }
-  return clampCardTransparency(saved);
-}
-
 function resolveAppearance(mode) {
   if (mode === "light" || mode === "dark") return mode;
   return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
-}
-
-function clampCardTransparency(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return DEFAULT_CARD_TRANSPARENCY;
-  return Math.min(CARD_TRANSPARENCY_MAX, Math.max(0, Math.round(number)));
-}
-
-function refreshCardTransparencyControls() {
-  const input = document.getElementById("cardTransparencyInput");
-  const label = document.getElementById("cardTransparencyLabel");
-  if (input && input.value !== String(cardTransparency)) input.value = String(cardTransparency);
-  if (label) label.textContent = `${cardTransparency}%`;
-}
-
-function applyCardTransparency(value = cardTransparency) {
-  cardTransparency = clampCardTransparency(value);
-  const alpha = Math.max(0.04, 1 - (cardTransparency / 100));
-  const shellAlpha = Math.max(0.05, Math.min(0.95, alpha * 0.88));
-  const softAlpha = Math.max(0.03, Math.min(0.9, alpha * 0.72));
-  const mutedAlpha = Math.max(0.02, Math.min(0.82, alpha * 0.58));
-  const blur = cardTransparency >= 88 ? 0 : Math.max(0, Math.round(18 * (1 - cardTransparency / 100)));
-  const root = document.documentElement;
-  root.style.setProperty("--card-alpha", alpha.toFixed(2));
-  root.style.setProperty("--card-shell-alpha", shellAlpha.toFixed(2));
-  root.style.setProperty("--card-soft-alpha", softAlpha.toFixed(2));
-  root.style.setProperty("--card-muted-alpha", mutedAlpha.toFixed(2));
-  root.style.setProperty("--card-blur", `${blur}px`);
-  root.dataset.cardTransparency = cardTransparency >= 88 ? "high" : (cardTransparency >= 55 ? "medium" : "low");
-  refreshCardTransparencyControls();
 }
 
 function setStartupLoading(title = "读取配置", detail = "正在加载工具与权限配置") {
@@ -254,9 +227,10 @@ function refreshAudioControls() {
   const soundLabel = document.getElementById("soundFeedbackLabel");
   soundButton?.classList.toggle("media-active", uiSoundEnabled);
   soundButton?.classList.toggle("sound-muted", !uiSoundEnabled);
-  if (soundLabel) soundLabel.textContent = uiSoundEnabled ? "开启" : "关闭";
+  if (soundLabel) soundLabel.textContent = uiSoundEnabled ? "开" : "关";
   if (soundButton) {
-    soundButton.title = uiSoundEnabled ? "按钮音效已开启" : "按钮音效已关闭";
+    soundButton.title = uiSoundEnabled ? "音效：开" : "音效：关";
+    soundButton.setAttribute("aria-label", uiSoundEnabled ? "音效：开" : "音效：关");
     soundButton.setAttribute("aria-pressed", uiSoundEnabled ? "true" : "false");
   }
 }
@@ -314,9 +288,9 @@ function buttonSoundKind(button) {
   if (id === "resetConfigBtn") return "reset";
   if (id === "enableAllToolsBtn") return "switch-on";
   if (id === "disableAllToolsBtn") return "switch-off";
-  if (id === "paletteToggleBtn" || id === "appearanceToggleBtn") return "switch";
+  if (id === "paletteToggleBtn") return "switch";
+  if (id === "appearanceToggleBtn") return "switch";
   if (id === "soundFeedbackBtn") return "switch";
-  if (button?.classList?.contains("tool-action")) return "";
   return button?.classList?.contains("btn-primary") ? "confirm" : "tap";
 }
 
@@ -331,7 +305,6 @@ function refreshThemeControls() {
   if (paletteLabel) paletteLabel.textContent = PALETTE_LABELS[paletteMode] || "石墨";
   if (appearanceLabel) appearanceLabel.textContent = APPEARANCE_LABELS[appearanceMode] || "自动";
   refreshAudioControls();
-  refreshCardTransparencyControls();
 }
 
 function applyPalette(mode = getStoredPaletteMode()) {
@@ -355,7 +328,7 @@ async function cyclePaletteMode() {
   savePaletteLocally(next);
   applyPalette(next);
   await saveUiPreferences();
-  showToast(`配色已切换为 ${PALETTE_LABELS[next] || next}`);
+  showToast(`配色已切换为 ${PALETTE_LABELS[next]}`);
 }
 
 async function cycleAppearanceMode() {
@@ -384,11 +357,6 @@ async function loadUiPreferences() {
       saveAppearanceLocally(appearance);
     }
     uiSoundEnabled = prefs.ui_sound_enabled !== false;
-    cardTransparency = clampCardTransparency(
-      prefs.card_transparency === undefined ? getStoredCardTransparency() : prefs.card_transparency
-    );
-    saveCardTransparencyLocally(cardTransparency);
-    applyCardTransparency(cardTransparency);
   } catch (e) {
     console.warn("loadUiPreferences", e);
   }
@@ -404,41 +372,10 @@ async function saveUiPreferences() {
       palette_mode: paletteMode,
       appearance_mode: appearanceMode,
       ui_sound_enabled: uiSoundEnabled,
-      card_transparency: cardTransparency,
     });
   } catch (e) {
     console.warn("saveUiPreferences", e);
   }
-}
-
-function handleCardTransparencyInput(event) {
-  applyCardTransparency(event.currentTarget.value);
-  saveCardTransparencyLocally(cardTransparency);
-  scheduleCardTransparencySave();
-}
-
-function scheduleCardTransparencySave() {
-  saveCardTransparencyLocally(cardTransparency);
-  window.clearTimeout(cardTransparencySaveTimer);
-  cardTransparencySaveTimer = window.setTimeout(() => {
-    saveCardTransparencyLocally(cardTransparency);
-    saveUiPreferences();
-  }, 450);
-}
-
-function flushCardTransparencySave() {
-  window.clearTimeout(cardTransparencySaveTimer);
-  saveCardTransparencyLocally(cardTransparency);
-  saveUiPreferences();
-}
-
-async function handleCardTransparencyChange(event) {
-  applyCardTransparency(event.currentTarget.value);
-  saveCardTransparencyLocally(cardTransparency);
-  window.clearTimeout(cardTransparencySaveTimer);
-  await saveUiPreferences();
-  playUiSound("switch");
-  showToast(`卡片透明度 ${cardTransparency}%`);
 }
 
 async function toggleUiSoundFeedback() {
@@ -453,23 +390,19 @@ async function toggleUiSoundFeedback() {
   }
   refreshAudioControls();
   await saveUiPreferences();
-  showToast(uiSoundEnabled ? "按钮音效已开启" : "按钮音效已关闭");
+  showToast(uiSoundEnabled ? "音效：开" : "音效：关");
 }
 
 async function init() {
   setStartupLoading("读取配置", "正在加载工具与权限配置");
   applyPalette();
   applyAppearance();
-  cardTransparency = getStoredCardTransparency();
-  applyCardTransparency(cardTransparency);
   window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
     if (appearanceMode === "auto") applyAppearance("auto");
   });
 
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
   document.getElementById("appearanceToggleBtn")?.addEventListener("click", cycleAppearanceMode);
-  document.getElementById("cardTransparencyInput")?.addEventListener("input", handleCardTransparencyInput);
-  document.getElementById("cardTransparencyInput")?.addEventListener("change", handleCardTransparencyChange);
   document.getElementById("soundFeedbackBtn")?.addEventListener("click", toggleUiSoundFeedback);
   document.addEventListener("pointerdown", unlockAudioFeedback, { once: true, capture: true });
   document.addEventListener("keydown", unlockAudioFeedback, { once: true, capture: true });
@@ -479,7 +412,6 @@ async function init() {
     const soundKind = buttonSoundKind(button);
     if (soundKind) playUiSound(soundKind);
   }, true);
-  window.addEventListener("beforeunload", flushCardTransparencySave);
   document.getElementById("refreshGroupsBtn")?.addEventListener("click", async () => {
     await loadContacts();
     showToast("群聊和私聊列表已刷新");
@@ -488,16 +420,6 @@ async function init() {
     searchTerm = event.currentTarget.value.trim().toLowerCase();
     renderGroupList();
     if (currentConfig) renderConfigPanel();
-  });
-  document.querySelector(".breadcrumb")?.addEventListener("click", () => {
-    const search = document.getElementById("dashboardSearch");
-    if (search) search.value = "";
-    searchTerm = "";
-    activeGroupFilter = "all";
-    renderGroupList();
-    if (currentConfig) renderConfigPanel();
-    document.getElementById("section-overview-top")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    showToast("已回到总览");
   });
   document.addEventListener("keydown", event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -563,7 +485,6 @@ function renderPathOptionsPanel() {
     <section class="dashboard-card path-card" id="section-paths">
       <div class="card-title-row">
         <div>
-          <p class="eyebrow">Path Options</p>
           <h3>外部路径</h3>
         </div>
         <button class="btn btn-secondary compact" id="savePathOptionsBtn" type="button">保存路径</button>
@@ -577,11 +498,16 @@ function renderPathOptionsPanel() {
           <span>GitHub CLI</span>
           <input class="input-field path-input" data-path-key="gh_path" value="${pathValue("gh_path")}" placeholder="留空自动检测 gh.exe">
         </label>
-        <label class="field wide">
-          <span>备份目录</span>
-          <input class="input-field path-input" data-path-key="backup_dir" value="${pathValue("backup_dir")}" placeholder="留空使用默认备份目录">
-        </label>
       </div>
+    </section>
+    <section class="dashboard-card backup-path-card" aria-label="备份目录">
+      <div class="card-title-row">
+        <h3>备份目录</h3>
+      </div>
+      <label class="field">
+        <span>safe_edit 备份位置</span>
+        <input class="input-field path-input" data-path-key="backup_dir" value="${pathValue("backup_dir")}" placeholder="留空使用默认备份目录">
+      </label>
     </section>`;
 }
 
@@ -701,7 +627,7 @@ async function selectGroup(groupId) {
   const requestId = ++groupRequestId;
   selectedGroupId = groupId;
   currentConfig = null;
-  activeGroupFilter = "all";
+  activeGroupFilter = "";
   renderGroupList();
   renderConfigPanel();
   try {
@@ -774,62 +700,55 @@ function renderMetricCards(allTools, enabledTools) {
   const disabledTools = Math.max(allTools.length - enabledTools, 0);
   const enabledGroups = Object.keys(currentConfig.tool_groups || {}).filter(key => currentConfig.tool_groups[key] !== false).length;
   const metrics = [
-    ["工具总数", allTools.length, "已注册工具", "total"],
-    ["可用工具", enabledTools, "当前对象已开启", "on"],
-    ["关闭工具", disabledTools, "当前对象已关闭", "off"],
-    ["启用分组", `${enabledGroups}/${groupCount}`, "工具组总开关", "group"],
+    ["工具总数", allTools.length, "total"],
+    ["可用工具", enabledTools, "on"],
+    ["关闭工具", disabledTools, "off"],
+    ["启用分组", `${enabledGroups}/${groupCount}`, "group"],
   ];
-  return metrics.map(([label, value, caption, tone], index) => `
+  return metrics.map(([label, value, tone]) => `
     <article class="metric-card ${tone}">
-      <div class="metric-head">
-        <span>${label}</span>
-        <div class="mini-bars" aria-hidden="true">${[0, 1, 2, 3, 4].map(i => `<i style="height:${12 + ((index + i) % 5) * 3}px"></i>`).join("")}</div>
-      </div>
+      <span>${label}</span>
       <strong>${escapeHtml(value)}</strong>
-      <small>${caption}</small>
     </article>`).join("");
 }
 
 function renderTrendCard() {
   const entries = sortedGroupEntries();
-  const maxTools = Math.max(...entries.map(([, tools]) => tools.length), 1);
-  const scaleLabels = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0]
+  const scaleLabels = [20, 15, 10, 5, 0]
     .map(value => `<span>${value}</span>`)
     .join("");
   const monthLabels = entries.slice(0, 12).map(([groupName, tools]) => {
     const stats = getGroupStats(groupName, tools);
-    const height = 18 + Math.round((stats.total / maxTools) * 110);
+    const height = Math.min(160, Math.round((stats.total / 20) * 160));
     const enabledHeight = chartMode === "group"
       ? height
-      : Math.max(6, Math.round(height * (stats.ratio / 100)));
+      : Math.round((stats.enabled / 20) * 160);
     return `
       <div class="chart-column" title="${escapeHtml(groupName)}：${stats.enabled}/${stats.total}">
         <div class="bar-rail">
           <i class="bar-total" style="height:${height}px"></i>
           <i class="bar-enabled" style="height:${enabledHeight}px"></i>
+          <b class="bar-value" style="bottom:${height + 5}px">${stats.total}</b>
         </div>
-        <span>${escapeHtml(iconForName(groupName))}</span>
+        <span>${escapeHtml(chartGroupLabel(groupName))}</span>
       </div>`;
   }).join("");
   const metaValue = chartMode === "group" ? entries.length : getEnabledToolCount();
-  const metaCaption = chartMode === "group" ? "个工具组参与统计" : "个工具可用";
   const metaLabel = chartMode === "group" ? "分组容量" : "当前对象";
   return `
     <section class="dashboard-card trend-card" id="section-overview">
       <div class="card-title-row">
         <div>
-          <p class="eyebrow">Tool Availability</p>
           <h3>工具启用分布</h3>
         </div>
         <div class="segmented" role="group" aria-label="图表统计模式">
-          <button class="segment-button ${chartMode === "group" ? "active" : ""}" type="button" data-chart-mode="group">Group</button>
-          <button class="segment-button ${chartMode === "live" ? "active" : ""}" type="button" data-chart-mode="live">Live</button>
+          <button class="segment-button ${chartMode === "group" ? "active" : ""}" type="button" data-chart-mode="group">按组</button>
+          <button class="segment-button ${chartMode === "live" ? "active" : ""}" type="button" data-chart-mode="live">实时</button>
         </div>
       </div>
       <div class="chart-meta">
         <span>${metaLabel}</span>
         <strong>${metaValue}</strong>
-        <span>${metaCaption}</span>
       </div>
       <div class="bar-chart">
         <div class="chart-scale" aria-hidden="true">${scaleLabels}</div>
@@ -840,17 +759,13 @@ function renderTrendCard() {
 
 function renderBreakdownCard() {
   const entries = sortedGroupEntries();
-  const visibleEntries = breakdownExpanded ? entries : entries.slice(0, 6);
-  const hiddenCount = Math.max(entries.length - visibleEntries.length, 0);
-  const rows = visibleEntries.map(([groupName, tools]) => {
+  const rows = entries.map(([groupName, tools]) => {
     const stats = getGroupStats(groupName, tools);
     return `
       <div class="breakdown-row ${stats.groupEnabled ? "" : "muted"}">
-        <div class="breakdown-icon">${escapeHtml(iconForName(groupName))}</div>
         <div class="breakdown-copy">
           <strong>${escapeHtml(groupName)}</strong>
-          <span>${stats.enabled}/${stats.total} 个工具可用</span>
-          <div class="progress"><i style="width:${stats.ratio}%"></i></div>
+          <span>${stats.enabled}/${stats.total} 可用</span>
         </div>
         <label class="switch" title="工具组总开关">
           <input class="group-toggle" type="checkbox" data-group="${escapeHtml(groupName)}" ${stats.groupEnabled ? "checked" : ""}>
@@ -858,19 +773,15 @@ function renderBreakdownCard() {
         </label>
       </div>`;
   }).join("");
-  const moreRow = hiddenCount > 0
-    ? `<button class="breakdown-more-row" type="button" data-breakdown-toggle>展开其余 ${hiddenCount} 个分组</button>`
-    : "";
   return `
     <section class="dashboard-card breakdown-card" id="section-groups">
-      <div class="card-title-row">
+      <div class="card-title-row group-title-row">
         <div>
-          <p class="eyebrow">Group Controls</p>
           <h3>工具分组</h3>
         </div>
-        <button class="more-button" type="button" data-breakdown-toggle aria-label="${breakdownExpanded ? "折叠工具分组" : "展开全部工具分组"}">${breakdownExpanded ? "收起" : "全部"}</button>
+        ${renderBulkActions()}
       </div>
-      <div class="breakdown-list">${rows || `<div class="table-empty">暂无工具分组</div>`}${moreRow}</div>
+      <div class="breakdown-list">${rows || `<div class="table-empty">暂无工具分组</div>`}</div>
     </section>`;
 }
 
@@ -879,13 +790,12 @@ function renderAdminCard(adminIdsStr) {
     <section class="dashboard-card admin-card" id="section-admins">
       <div class="card-title-row">
         <div>
-          <p class="eyebrow">Permission</p>
           <h3>管理员权限</h3>
         </div>
       </div>
       <div class="admin-grid">
         <div class="admin-note">
-          <span>全局管理员</span>
+          <span>全局管理员（AstrBot）</span>
           <strong>${escapeHtml(adminIdsStr)}</strong>
         </div>
         <label class="field">
@@ -896,40 +806,25 @@ function renderAdminCard(adminIdsStr) {
     </section>`;
 }
 
-function renderBulkCard() {
+function renderBulkActions() {
   return `
-    <section class="dashboard-card bulk-card">
-      <div class="card-title-row">
-        <div>
-          <p class="eyebrow">Quick Actions</p>
-          <h3>批量操作</h3>
-        </div>
-      </div>
-      <div class="bulk-actions">
-        <button class="bulk-row" id="enableAllToolsBtn" type="button">
-          <span>开启全部工具</span>
-          <b>打开所有工具组与单工具</b>
-        </button>
-        <button class="bulk-row danger" id="disableAllToolsBtn" type="button">
-          <span>关闭全部工具</span>
-          <b>关闭所有工具组与单工具</b>
-        </button>
-      </div>
-    </section>`;
+    <div class="bulk-actions group-bulk-actions" aria-label="批量操作">
+      <button class="bulk-row" id="enableAllToolsBtn" type="button">开启全部工具</button>
+      <button class="bulk-row danger" id="disableAllToolsBtn" type="button">关闭全部工具</button>
+    </div>`;
 }
 
 function renderGroupFilters() {
-  const filters = [`<button class="group-filter ${activeGroupFilter === "all" ? "active" : ""}" type="button" data-group="all">全部</button>`];
-  for (const [groupName, tools] of sortedGroupEntries()) {
-    filters.push(`<button class="group-filter ${activeGroupFilter === groupName ? "active" : ""}" type="button" data-group="${escapeHtml(groupName)}">${escapeHtml(groupName)}<span>${tools.length}</span></button>`);
-  }
-  return filters.join("");
+  return sortedGroupEntries().map(([groupName, tools]) => `
+    <button class="group-filter ${activeGroupFilter === groupName ? "active" : ""}" type="button" data-group="${escapeHtml(groupName)}">
+      ${escapeHtml(groupName)}<span>${tools.length}</span>
+    </button>`).join("");
 }
 
 function filteredToolRows() {
   const disabled = new Set(currentConfig.disabled_tools || []);
   return allToolItems().filter(tool => {
-    const groupOk = activeGroupFilter === "all" || tool.groupName === activeGroupFilter;
+    const groupOk = Boolean(activeGroupFilter) && tool.groupName === activeGroupFilter;
     if (!groupOk) return false;
     if (!searchTerm) return true;
     return [tool.id, tool.name, tool.desc, tool.groupName].join(" ").toLowerCase().includes(searchTerm);
@@ -939,24 +834,21 @@ function filteredToolRows() {
 function renderToolGroupCards() {
   const rows = filteredToolRows();
   if (!rows.length) {
-    return `<tr><td colspan="5"><div class="table-empty">没有匹配的工具配置项</div></td></tr>`;
+    return `<tr><td colspan="3"><div class="table-empty">没有匹配的工具</div></td></tr>`;
   }
   return rows.map(tool => `
     <tr class="${tool.enabled ? "" : "disabled-row"}">
       <td>
         <div class="tool-cell">
-          <span>${escapeHtml(iconForName(tool.groupName))}</span>
-          <div><strong>${escapeHtml(tool.name)}</strong><small>${escapeHtml(tool.id)}</small></div>
+          <div><strong>${escapeHtml(tool.name)}</strong>${tool.name !== tool.id ? `<small>${escapeHtml(tool.id)}</small>` : ""}</div>
         </div>
       </td>
       <td>${escapeHtml(tool.groupName)}</td>
-      <td class="desc-cell">${escapeHtml(tool.desc)}</td>
-      <td><span class="status-pill ${tool.enabled ? "on" : "off"}">${tool.enabled ? "已开启" : "已关闭"}</span></td>
       <td>
-        <button class="tool-action tool-switch ${tool.enabled ? "enabled" : "disabled"}" type="button" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(tool.groupName)}" aria-pressed="${tool.enabled ? "true" : "false"}">
-          <span class="switch-mini" aria-hidden="true"></span>
-          <b>${tool.enabled ? "关闭" : "开启"}</b>
-        </button>
+        <label class="switch tool-toggle" title="${tool.enabled ? "关闭工具" : "开启工具"}">
+          <input class="tool-action" type="checkbox" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(tool.groupName)}" ${tool.enabled ? "checked" : ""} aria-label="${tool.enabled ? "关闭工具" : "开启工具"}">
+          <span class="switch-track"></span><span class="switch-thumb"></span>
+        </label>
       </td>
     </tr>`).join("");
 }
@@ -984,14 +876,12 @@ function renderConfigPanel() {
     <div class="dashboard-content">
       <section class="welcome-row" id="section-overview-top">
         <div>
-          <p class="eyebrow">弥亚开发工具箱</p>
-          <h2>Welcome back, ${escapeHtml(target.name)}</h2>
-          <span>${escapeHtml(target.kind)}配置 · ${escapeHtml(target.hint)}</span>
+          <h2>${escapeHtml(target.name)}</h2>
+          <span>${escapeHtml(target.kind)}配置</span>
         </div>
         <div class="welcome-actions">
-          <button class="btn btn-secondary compact" id="resetConfigBtn" type="button">重置当前配置</button>
-          <button class="btn btn-primary compact" id="saveConfigBtn" type="button">保存配置</button>
-          <time>${formatDate()}</time>
+          <button class="btn btn-secondary compact" id="resetConfigBtn" type="button">重置</button>
+          <button class="btn btn-primary compact" id="saveConfigBtn" type="button">保存</button>
         </div>
       </section>
 
@@ -999,38 +889,35 @@ function renderConfigPanel() {
 
       <section class="analysis-grid">
         ${renderTrendCard()}
-        ${renderBreakdownCard()}
       </section>
 
       <section class="settings-grid">
         ${renderAdminCard(adminIdsStr)}
-        ${renderBulkCard()}
         ${renderPathOptionsPanel()}
       </section>
+
+      ${renderBreakdownCard()}
 
       <section class="dashboard-card tool-table-card" id="section-tools">
         <div class="card-title-row table-head">
           <div>
-            <p class="eyebrow">Recent Tools</p>
-            <h3>工具配置项</h3>
+            <h3>工具开关</h3>
           </div>
           <div class="table-summary"><strong>${enabledTools}</strong><span>开启</span><strong>${disabledCount}</strong><span>关闭</span></div>
         </div>
         <div class="filter-row">${renderGroupFilters()}</div>
-        <div class="table-wrap">
+        ${activeGroupFilter ? `<div class="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>工具</th>
                 <th>分组</th>
-                <th>说明</th>
-                <th>状态</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>${renderToolGroupCards()}</tbody>
           </table>
-        </div>
+        </div>` : ""}
       </section>
     </div>`;
 
@@ -1055,25 +942,23 @@ function bindConfigEvents() {
       currentConfig.tool_groups[groupName] = enabled;
       asToolItems(toolGroupsDef[groupName] || []).forEach(tool => setToolDisabled(tool.id, !enabled));
       renderConfigPanel();
-      showToast(`${groupName} 已${enabled ? "开启" : "关闭"}，记得保存`);
     });
   });
 
-  panel.querySelectorAll(".tool-action").forEach(button => {
-    button.addEventListener("click", event => {
+  panel.querySelectorAll(".tool-action").forEach(input => {
+    input.addEventListener("change", event => {
       const toolId = event.currentTarget.dataset.tool;
-      const disabledSet = new Set(currentConfig.disabled_tools || []);
-      const shouldDisable = !disabledSet.has(toolId);
+      const shouldDisable = !event.currentTarget.checked;
       playUiSound(shouldDisable ? "switch-off" : "switch-on");
       setToolDisabled(toolId, shouldDisable);
       renderConfigPanel();
-      showToast(`${toolId} 已${shouldDisable ? "关闭" : "开启"}，记得保存`);
     });
   });
 
   panel.querySelectorAll(".group-filter").forEach(button => {
     button.addEventListener("click", event => {
-      activeGroupFilter = event.currentTarget.dataset.group || "all";
+      const groupName = event.currentTarget.dataset.group || "";
+      activeGroupFilter = activeGroupFilter === groupName ? "" : groupName;
       renderConfigPanel();
     });
   });
@@ -1086,23 +971,15 @@ function bindConfigEvents() {
     });
   });
 
-  panel.querySelectorAll("[data-breakdown-toggle]").forEach(button => {
-    button.addEventListener("click", () => {
-      breakdownExpanded = !breakdownExpanded;
-      renderConfigPanel();
-      showToast(breakdownExpanded ? "已展开全部工具分组" : "已折叠工具分组");
-    });
-  });
-
   document.getElementById("enableAllToolsBtn")?.addEventListener("click", async () => {
     setAllToolsState(true);
     renderConfigPanel();
-    showToast("已开启全部工具，记得保存");
+    showToast("已开启全部工具");
   });
   document.getElementById("disableAllToolsBtn")?.addEventListener("click", async () => {
     setAllToolsState(false);
     renderConfigPanel();
-    showToast("已关闭全部工具，记得保存");
+    showToast("已关闭全部工具");
   });
   document.getElementById("saveConfigBtn")?.addEventListener("click", saveConfig);
   document.getElementById("resetConfigBtn")?.addEventListener("click", resetConfig);
@@ -1211,7 +1088,7 @@ async function resetConfig() {
   for (const groupName of Object.keys(toolGroupsDef)) toolGroups[groupName] = true;
   currentConfig = { group_id: selectedGroupId, extra_admin_ids: "", tool_groups: toolGroups, disabled_tools: [] };
   renderConfigPanel();
-  showToast("已重置当前配置，记得保存");
+  showToast("已重置当前配置");
 }
 
 function showToast(message) {
