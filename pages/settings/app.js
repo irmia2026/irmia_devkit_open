@@ -7,68 +7,17 @@ const APPEARANCE_KEY = "irmia_devkit_appearance_mode";
 const CARD_TRANSPARENCY_KEY = "irmia_devkit_card_transparency";
 const PALETTE_MODES = ["luxury", "bluewhite", "vivid", "void"];
 const APPEARANCE_MODES = ["auto", "dark", "light"];
-const MEDIA_AUDIO_MODES = ["video", "audio", "both", "off"];
 const PALETTE_LABELS = { luxury: "石墨", bluewhite: "晴空", vivid: "珊瑚", void: "夜色" };
 const APPEARANCE_LABELS = { auto: "自动", dark: "深色", light: "浅色" };
-const BACKGROUND_MODES = ["preset", "custom"];
-const BACKGROUND_KIND_LABELS = { image: "图片", gif: "动图", video: "视频" };
-const MEDIA_AUDIO_LABELS = { video: "视频声", audio: "背景音", both: "同时", off: "全关" };
 const DEFAULT_CARD_TRANSPARENCY = 18;
 const CARD_TRANSPARENCY_MAX = 95;
-const MEDIA_UPLOAD_CHUNK_BYTES = 384 * 1024;
-const MEDIA_READ_CHUNK_BYTES = 128 * 1024;
-const VIDEO_PROGRESS_KEY_PREFIX = "irmia_devkit_video_progress:";
-const VIDEO_PROGRESS_RESET_GUARD_SECONDS = 2;
-const VIDEO_MIME_BY_EXT = {
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".ogg": "video/ogg",
-  ".ogv": "video/ogg",
-  ".mov": "video/quicktime",
-};
-const AUDIO_MIME_BY_EXT = {
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".ogg": "audio/ogg",
-  ".oga": "audio/ogg",
-  ".m4a": "audio/mp4",
-  ".aac": "audio/aac",
-  ".flac": "audio/flac",
-  ".webm": "audio/webm",
-};
-const IMAGE_MIME_BY_EXT = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".bmp": "image/bmp",
-  ".ico": "image/x-icon",
-};
 
 let paletteMode = "luxury";
 let appearanceMode = "auto";
-let backgroundMode = "preset";
-let backgroundMediaEnabled = true;
-let customBackgroundUrl = "";
-let backgroundMedia = null;
-let backgroundAudioMedia = null;
-let savedLocalVideoMedia = null;
 let uiSoundEnabled = true;
-let mediaAudioMode = "video";
-let videoSoundEnabled = false;
-let videoSoundUserSet = false;
 let cardTransparency = DEFAULT_CARD_TRANSPARENCY;
 let audioUnlocked = false;
 let audioContext = null;
-let pendingBackgroundAudioPlay = false;
-let activeBackgroundObjectUrl = "";
-let pendingVideoSeek = null;
-let videoProgressSaveTimer = 0;
-let videoProgressHeartbeatTimer = 0;
-let videoProgressHeartbeatLastSyncAt = 0;
-let videoProgressRestoreTarget = 0;
-let videoProgressRestoring = false;
 let cardTransparencySaveTimer = 0;
 let api = null;
 let toolGroupsDef = {};
@@ -76,6 +25,7 @@ let groupsData = [];
 let contactsData = [];
 let selectedGroupId = "";
 let currentConfig = null;
+let groupRequestId = 0;
 let globalAdminIds = [];
 let pathOptions = { es_path: "", gh_path: "", backup_dir: "" };
 let searchTerm = "";
@@ -83,7 +33,7 @@ let activeGroupFilter = "all";
 let chartMode = "live";
 let breakdownExpanded = false;
 
-const collapsedMenus = { groups: true, contacts: true };
+const collapsedMenus = { groups: false, contacts: false };
 const DEFAULT_GROUP = {
   id: "__default__",
   name: "全局配置",
@@ -256,265 +206,10 @@ function resolveAppearance(mode) {
   return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
 }
 
-function mediaSource(media) {
-  return String(media?.url || media?.data_url || "");
-}
-
-function backgroundTypeForSource(source) {
-  const value = String(source || "").trim().toLowerCase();
-  if (value.startsWith("data:image/gif")) return "gif";
-  if (value.startsWith("data:image/")) return "image";
-  if (value.startsWith("data:video/") || value.startsWith("blob:")) return "video";
-  return "";
-}
-
-function backgroundTypeForMedia(media) {
-  if (!media) return "";
-  const mime = String(media.mime || "").toLowerCase();
-  if (media.kind === "video" || mime.startsWith("video/")) return "video";
-  if (mime === "image/gif") return "gif";
-  if (media.kind === "image" || mime.startsWith("image/")) return "image";
-  return backgroundTypeForSource(mediaSource(media));
-}
-
-function fileExtension(filename) {
-  const match = String(filename || "").toLowerCase().match(/\.[a-z0-9]+$/);
-  return match ? match[0] : "";
-}
-
-function mimeFromExtension(filename) {
-  const ext = fileExtension(filename);
-  return VIDEO_MIME_BY_EXT[ext] || AUDIO_MIME_BY_EXT[ext] || IMAGE_MIME_BY_EXT[ext] || "";
-}
-
-function safeStorageToken(value) {
-  return String(value || "")
-    .trim()
-    .replace(/[^A-Za-z0-9._-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 72) || "local";
-}
-
-function localVideoIdForFile(file) {
-  const name = safeStorageToken(file?.name || "video");
-  const size = Math.max(0, Number(file?.size || 0));
-  const modified = Math.max(0, Number(file?.lastModified || 0));
-  return `${name}_${size}_${modified}`.slice(0, 120);
-}
-
-function matchesSavedLocalVideo(file, localId) {
-  if (!savedLocalVideoMedia) return false;
-  if (savedLocalVideoMedia.local_id === localId) return true;
-  const savedName = String(savedLocalVideoMedia.filename || "");
-  const savedSize = Number(savedLocalVideoMedia.size || 0);
-  return savedName === String(file?.name || "") && (!savedSize || savedSize === Number(file?.size || 0));
-}
-
-function videoProgressStorageKey(media) {
-  const id = media?.local_id || media?.progress_key || media?.storage || media?.filename || "";
-  return id ? `${VIDEO_PROGRESS_KEY_PREFIX}${safeStorageToken(id)}` : "";
-}
-
-function readSavedVideoPlaybackTime(media) {
-  const key = videoProgressStorageKey(media);
-  if (!key) return Number(media?.playback_time || 0) || 0;
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "{}");
-    const time = Number(parsed.time);
-    if (Number.isFinite(time) && time > 0) return time;
-  } catch { /* ignore */ }
-  return Number(media?.playback_time || 0) || 0;
-}
-
-function writeSavedVideoPlaybackTime(media, time) {
-  const key = videoProgressStorageKey(media);
-  const value = Number(time);
-  if (!key || !Number.isFinite(value) || value < 0) return;
-  const rounded = Math.max(0, Number(value.toFixed(2)));
-  try {
-    localStorage.setItem(key, JSON.stringify({ time: rounded, updated_at: Date.now() }));
-  } catch { /* ignore */ }
-  if (media) media.playback_time = rounded;
-}
-
-function hasReachedVideoRestoreTarget(video) {
-  if (!videoProgressRestoreTarget) return true;
-  if (!video) return false;
-  const time = Number(video.currentTime || 0);
-  if (!Number.isFinite(time)) return false;
-  return time >= Math.max(0.25, videoProgressRestoreTarget - 0.5);
-}
-
-function markVideoProgressRestored(video) {
-  if (!videoProgressRestoring && !videoProgressRestoreTarget) return true;
-  if (!hasReachedVideoRestoreTarget(video)) return false;
-  videoProgressRestoreTarget = 0;
-  videoProgressRestoring = false;
-  return true;
-}
-
-function restoreVideoPlaybackProgress(video, media) {
-  const savedTime = readSavedVideoPlaybackTime(media);
-  videoProgressRestoreTarget = 0;
-  videoProgressRestoring = false;
-  if (!video || !savedTime) return;
-  const seek = () => {
-    const duration = Number(video.duration || 0);
-    const nextTime = duration > 1 ? Math.min(savedTime, Math.max(0, duration - 0.6)) : savedTime;
-    videoProgressRestoreTarget = Number.isFinite(nextTime) && nextTime > 0 ? nextTime : 0;
-    videoProgressRestoring = videoProgressRestoreTarget > 0;
-    try {
-      if (Number.isFinite(nextTime) && nextTime > 0) video.currentTime = nextTime;
-    } catch {
-      pendingVideoSeek = nextTime;
-    }
-  };
-  if (video.readyState >= 1) seek();
-  else {
-    pendingVideoSeek = savedTime;
-    videoProgressRestoring = true;
-    video.addEventListener("loadedmetadata", seek, { once: true });
-  }
-}
-
-function shouldSaveVideoPlaybackProgress(media, time, { allowReset = false } = {}) {
-  if (!media || media.kind !== "video") return false;
-  if (!Number.isFinite(time) || time < 0) return false;
-  if (!allowReset && videoProgressRestoreTarget > 0 && time < Math.max(0.25, videoProgressRestoreTarget - 0.5)) return false;
-  if (videoProgressRestoreTarget > 0 && time >= Math.max(0.25, videoProgressRestoreTarget - 0.5)) {
-    videoProgressRestoreTarget = 0;
-    videoProgressRestoring = false;
-  }
-  if (videoProgressRestoring && !allowReset) return false;
-  const previousTime = readSavedVideoPlaybackTime(media);
-  if (!allowReset && previousTime > VIDEO_PROGRESS_RESET_GUARD_SECONDS && time < VIDEO_PROGRESS_RESET_GUARD_SECONDS) return false;
-  return true;
-}
-
-function saveVideoPlaybackProgress({ syncPreferences = false, allowReset = false } = {}) {
-  const video = document.getElementById("customBackgroundVideo");
-  if (!video || !backgroundMedia || backgroundMedia.kind !== "video") return;
-  const time = Number(video.currentTime || 0);
-  if (!shouldSaveVideoPlaybackProgress(backgroundMedia, time, { allowReset })) return;
-  writeSavedVideoPlaybackTime(backgroundMedia, time);
-  if (syncPreferences) saveUiPreferences();
-}
-
-function startVideoProgressHeartbeat() {
-  if (videoProgressHeartbeatTimer) return;
-  videoProgressHeartbeatLastSyncAt = Date.now();
-  videoProgressHeartbeatTimer = window.setInterval(() => {
-    const now = Date.now();
-    const shouldSyncPreferences = now - videoProgressHeartbeatLastSyncAt >= 3500;
-    saveVideoPlaybackProgress({ syncPreferences: shouldSyncPreferences });
-    if (shouldSyncPreferences) videoProgressHeartbeatLastSyncAt = now;
-  }, 1000);
-}
-
-function stopVideoProgressHeartbeat({ flush = false } = {}) {
-  if (videoProgressHeartbeatTimer) {
-    window.clearInterval(videoProgressHeartbeatTimer);
-    videoProgressHeartbeatTimer = 0;
-  }
-  if (flush) flushVideoPlaybackProgressSave();
-}
-
-function flushVideoPlaybackProgressSave() {
-  window.clearTimeout(videoProgressSaveTimer);
-  saveVideoPlaybackProgress({ syncPreferences: true });
-  videoProgressHeartbeatLastSyncAt = Date.now();
-}
-
-function scheduleVideoPlaybackProgressSave() {
-  saveVideoPlaybackProgress();
-  window.clearTimeout(videoProgressSaveTimer);
-  videoProgressSaveTimer = window.setTimeout(() => saveVideoPlaybackProgress({ syncPreferences: true }), 1200);
-}
-
-function mediaKindForFile(file) {
-  const mime = String(file?.type || mimeFromExtension(file?.name) || "").toLowerCase();
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  if (mime.startsWith("image/")) return "image";
-  return "";
-}
-
-function isVideoFile(file) {
-  return mediaKindForFile(file) === "video";
-}
-
 function clampCardTransparency(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return DEFAULT_CARD_TRANSPARENCY;
   return Math.min(CARD_TRANSPARENCY_MAX, Math.max(0, Math.round(number)));
-}
-
-function isBackgroundAudioEnabled() {
-  return Boolean(backgroundAudioMedia && mediaSource(backgroundAudioMedia) && (mediaAudioMode === "audio" || mediaAudioMode === "both"));
-}
-
-function hasStoredVideoBackground(media = backgroundMedia) {
-  return Boolean(media?.kind === "video" && media.storage);
-}
-
-function hasRestorableLocalVideo(media = backgroundMedia) {
-  return Boolean(media?.kind === "video" && media.local_id && !mediaSource(media));
-}
-
-function hasVideoBackground() {
-  return backgroundMode === "custom" && backgroundMedia?.kind === "video" && Boolean(mediaSource(backgroundMedia));
-}
-
-function getEffectiveVideoSoundEnabled() {
-  if (!hasVideoBackground()) return false;
-  return mediaAudioMode === "video" || mediaAudioMode === "both";
-}
-
-function hasBackgroundAudio() {
-  return Boolean(mediaSource(backgroundAudioMedia));
-}
-
-function availableMediaAudioModes() {
-  const hasVideo = hasVideoBackground();
-  const hasAudio = hasBackgroundAudio();
-  const modes = [];
-  if (hasVideo) modes.push("video");
-  if (hasAudio) modes.push("audio");
-  if (hasVideo && hasAudio) modes.push("both");
-  modes.push("off");
-  return modes;
-}
-
-function normalizeMediaAudioMode(mode = mediaAudioMode) {
-  const desired = MEDIA_AUDIO_MODES.includes(mode) ? mode : "video";
-  if (desired === "off") return "off";
-  const modes = availableMediaAudioModes();
-  return modes.includes(desired) ? desired : (modes.find(item => item !== "off") || "off");
-}
-
-function syncLegacyAudioFlags() {
-  mediaAudioMode = normalizeMediaAudioMode(mediaAudioMode);
-  videoSoundEnabled = mediaAudioMode === "video" || mediaAudioMode === "both";
-  videoSoundUserSet = true;
-  if (backgroundAudioMedia) backgroundAudioMedia.enabled = mediaAudioMode === "audio" || mediaAudioMode === "both";
-}
-
-function refreshVideoSoundControls() {
-  const button = document.getElementById("backgroundAudioBtn");
-  const label = document.getElementById("mediaAudioModeLabel") || document.getElementById("backgroundAudioLabel");
-  const hasVideo = hasVideoBackground();
-  const hasAudio = hasBackgroundAudio();
-  const enabled = getEffectiveVideoSoundEnabled();
-  if (!button) return;
-  mediaAudioMode = normalizeMediaAudioMode(mediaAudioMode);
-  button.disabled = false;
-  button.classList.toggle("media-active", hasVideo || hasAudio);
-  button.classList.toggle("sound-muted", mediaAudioMode === "off" || (!enabled && mediaAudioMode !== "audio" && mediaAudioMode !== "both"));
-  if (label) label.textContent = hasVideo || hasAudio ? (MEDIA_AUDIO_LABELS[mediaAudioMode] || "视频声") : "上传";
-  button.title = hasVideo && hasAudio
-    ? "点击切换视频声 / 背景音 / 同时播放 / 全关"
-    : (hasVideo ? "点击切换视频声 / 全关，上传背景音后可切换更多模式" : "点击切换背景音 / 全关");
-  button.setAttribute("aria-pressed", hasVideo || hasAudio ? (mediaAudioMode === "off" ? "false" : "true") : "false");
 }
 
 function refreshCardTransparencyControls() {
@@ -541,163 +236,6 @@ function applyCardTransparency(value = cardTransparency) {
   refreshCardTransparencyControls();
 }
 
-function revokeBackgroundObjectUrl() {
-  if (!activeBackgroundObjectUrl) return;
-  if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
-    URL.revokeObjectURL(activeBackgroundObjectUrl);
-  }
-  activeBackgroundObjectUrl = "";
-}
-
-function attachUploadedVideoSource(media, file) {
-  if (media?.kind !== "video" || !file || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
-    return media;
-  }
-  revokeBackgroundObjectUrl();
-  activeBackgroundObjectUrl = URL.createObjectURL(file);
-  return { ...media, url: activeBackgroundObjectUrl };
-}
-
-function blobToBase64Payload(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = String(reader.result || "");
-      resolve(value.includes(",") ? value.split(",", 2)[1] : value);
-    };
-    reader.onerror = () => reject(new Error("媒体分片读取失败"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function base64ToBytes(base64) {
-  const binary = atob(String(base64 || ""));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-async function uploadChunkedMedia(slot, file) {
-  if (!api) throw new Error("插件 API 尚未就绪");
-  const kind = mediaKindForFile(file);
-  const mime = String(file.type || mimeFromExtension(file.name) || "application/octet-stream").toLowerCase();
-  const init = await api.safePost(`media/${slot}/chunk/init`, {
-    filename: file.name || "media",
-    mime,
-    size: file.size || 0,
-  });
-  const uploadId = init.upload_id;
-  const chunkBytes = Math.min(Number(init.chunk_bytes) || MEDIA_UPLOAD_CHUNK_BYTES, MEDIA_UPLOAD_CHUNK_BYTES);
-  if (!uploadId) throw new Error("媒体上传会话创建失败");
-  let index = 0;
-  for (let offset = 0; offset < file.size; offset += chunkBytes) {
-    const chunk = file.slice(offset, Math.min(offset + chunkBytes, file.size));
-    const data = await blobToBase64Payload(chunk);
-    await api.safePost(`media/${slot}/chunk/append`, {
-      upload_id: uploadId,
-      index,
-      data,
-    });
-    index += 1;
-    const percent = Math.min(99, Math.round(((offset + chunk.size) / file.size) * 100));
-    showToast(`正在上传视频 ${percent}%...`);
-  }
-  const completed = await api.safePost(`media/${slot}/chunk/complete`, { upload_id: uploadId });
-  const media = completed.media || completed;
-  if (!media?.kind) throw new Error("媒体上传响应缺少类型");
-  return kind === "video" ? attachUploadedVideoSource(media, file) : media;
-}
-
-async function downloadStoredMedia(media, slot = "background") {
-  if (!api || !media?.storage) return null;
-  const chunks = [];
-  let offset = 0;
-  let done = false;
-  let guard = 0;
-  const expectedSize = Math.max(0, Number(media.size || 0));
-  const maxChunks = Math.max(2, Math.ceil((expectedSize || (50 * 1024 * 1024)) / MEDIA_READ_CHUNK_BYTES) + 2);
-  while (!done) {
-    guard += 1;
-    if (guard > maxChunks) throw new Error("stored media chunk read exceeded expected size");
-    const result = await api.safePost(`media/${slot}/chunk/read`, {
-      storage: media.storage,
-      mime: media.mime,
-      offset,
-      length: MEDIA_READ_CHUNK_BYTES,
-    });
-    const encoded = typeof result === "string" ? result : (result?.chunk_data || result?.data || "");
-    if (!encoded) throw new Error("stored media chunk read returned empty data");
-    const bytes = base64ToBytes(encoded);
-    chunks.push(bytes);
-    const nextOffset = typeof result === "object" ? Number(result.next_offset || 0) : 0;
-    offset = Number.isFinite(nextOffset) && nextOffset > offset ? nextOffset : offset + bytes.byteLength;
-    done = typeof result === "object"
-      ? Boolean(result.done)
-      : (expectedSize ? offset >= expectedSize : bytes.byteLength < MEDIA_READ_CHUNK_BYTES);
-  }
-  if (!chunks.length) return null;
-  if (expectedSize && offset < expectedSize) throw new Error("stored media chunk read was incomplete");
-  return new Blob(chunks, { type: media.mime || "application/octet-stream" });
-}
-
-async function hydrateStoredMedia(media) {
-  if (!media || mediaSource(media)) return media;
-  if (media.kind === "video" && media.storage) {
-    try {
-      const blob = await downloadStoredMedia(media, "background");
-      return blob ? attachUploadedVideoSource(media, blob) : media;
-    } catch (error) {
-      console.warn("hydrateStoredMedia", error);
-    }
-  }
-  return media;
-}
-
-function persistableMedia(media) {
-  if (!media) return null;
-  const clean = {};
-  ["kind", "mime", "storage", "local_id", "filename", "size", "last_modified", "enabled", "playback_time"].forEach(key => {
-    if (media[key] !== undefined && media[key] !== null && media[key] !== "") clean[key] = media[key];
-  });
-  if (media.local) clean.local = true;
-  if (!clean.storage && !clean.local_id && mediaSource(media)) clean.data_url = mediaSource(media);
-  return Object.keys(clean).length ? clean : null;
-}
-
-function resetBackgroundVideo({ revoke = true } = {}) {
-  const video = document.getElementById("customBackgroundVideo");
-  saveVideoPlaybackProgress();
-  stopVideoProgressHeartbeat();
-  videoProgressRestoreTarget = 0;
-  videoProgressRestoring = false;
-  if (revoke) revokeBackgroundObjectUrl();
-  if (!video) return;
-  video.pause();
-  video.removeAttribute("src");
-  video.load();
-  refreshVideoSoundControls();
-}
-
-function primeBackgroundVideo(video) {
-  if (!video) return;
-  video.loop = true;
-  video.playsInline = true;
-  video.defaultPlaybackRate = 1;
-  video.playbackRate = 1;
-  video.preload = "auto";
-  video.setAttribute("playsinline", "");
-  video.setAttribute("preload", "auto");
-  video.setAttribute("autoplay", "");
-}
-
-function applyBackgroundVideoAudioState(video, shouldPlaySound) {
-  if (!video) return;
-  video.muted = !shouldPlaySound;
-  video.volume = shouldPlaySound ? 1 : 0;
-}
-
 function setStartupLoading(title = "读取配置", detail = "正在加载工具与权限配置") {
   const loader = document.getElementById("startupLoader");
   const titleEl = document.getElementById("startupLoaderTitle");
@@ -711,67 +249,9 @@ function hideStartupLoading() {
   document.getElementById("startupLoader")?.classList.add("is-hidden");
 }
 
-function startBackgroundVideoPlayback(video, shouldPlaySound) {
-  primeBackgroundVideo(video);
-  video.muted = true;
-  video.volume = 0;
-  const playResult = video.play();
-  playResult?.then?.(() => applyBackgroundVideoAudioState(video, shouldPlaySound));
-  playResult?.then?.(() => startVideoProgressHeartbeat());
-  if (!playResult?.then) startVideoProgressHeartbeat();
-  return playResult;
-}
-
-function refreshBackgroundVideo(media) {
-  return;
-  const video = document.getElementById("customBackgroundVideo");
-  if (!video) return;
-  const source = media?.kind === "video" ? mediaSource(media) : "";
-  if (!source) {
-    resetBackgroundVideo();
-    return;
-  }
-  const sourceChanged = video.src !== source;
-  if (sourceChanged) {
-    setStartupLoading("缓存视频", "正在准备本地视频背景");
-    video.src = source;
-    restoreVideoPlaybackProgress(video, media);
-    video.addEventListener("loadeddata", hideStartupLoading, { once: true });
-  } else if (pendingVideoSeek && video.readyState >= 1) {
-    try {
-      video.currentTime = pendingVideoSeek;
-      pendingVideoSeek = null;
-    } catch { /* ignore */ }
-  }
-  const shouldPlaySound = getEffectiveVideoSoundEnabled();
-  const playResult = startBackgroundVideoPlayback(video, shouldPlaySound);
-  playResult?.catch?.(error => {
-    console.warn("[DevKit] background video failed to play", error);
-    hideStartupLoading();
-    if (shouldPlaySound && error?.name === "NotAllowedError") {
-      showToast("浏览器阻止自动播放视频原声，点击页面后会再次尝试播放");
-      return;
-    }
-    showToast("视频背景无法播放，请换 MP4/WebM/OGV/MOV 或重新上传");
-  });
-  refreshVideoSoundControls();
-}
-
 function refreshAudioControls() {
-  const audio = document.getElementById("backgroundAudio");
-  const audioButton = document.getElementById("backgroundAudioBtn");
-  const replaceButton = document.getElementById("replaceBackgroundAudioBtn");
-  const label = document.getElementById("mediaAudioModeLabel") || document.getElementById("backgroundAudioLabel");
   const soundButton = document.getElementById("soundFeedbackBtn");
   const soundLabel = document.getElementById("soundFeedbackLabel");
-  const hasAudio = hasBackgroundAudio();
-  const playing = hasAudio && audio && !audio.paused;
-
-  mediaAudioMode = normalizeMediaAudioMode(mediaAudioMode);
-  if (label) label.textContent = hasAudio || hasVideoBackground() ? (MEDIA_AUDIO_LABELS[mediaAudioMode] || "视频声") : "上传";
-  audioButton?.classList.toggle("media-active", hasAudio || hasVideoBackground());
-  audioButton?.classList.toggle("audio-playing", Boolean(playing));
-  replaceButton?.classList.toggle("media-active", hasAudio);
   soundButton?.classList.toggle("media-active", uiSoundEnabled);
   soundButton?.classList.toggle("sound-muted", !uiSoundEnabled);
   if (soundLabel) soundLabel.textContent = uiSoundEnabled ? "开启" : "关闭";
@@ -779,7 +259,6 @@ function refreshAudioControls() {
     soundButton.title = uiSoundEnabled ? "按钮音效已开启" : "按钮音效已关闭";
     soundButton.setAttribute("aria-pressed", uiSoundEnabled ? "true" : "false");
   }
-  refreshVideoSoundControls();
 }
 
 function ensureAudioContext() {
@@ -832,12 +311,11 @@ function buttonSoundKind(button) {
   if (id === "confirmOkBtn") return "confirm";
   if (id === "confirmCancelBtn") return "cancel";
   if (id === "saveConfigBtn" || id === "savePathOptionsBtn") return "confirm";
-  if (id === "resetConfigBtn" || id === "presetBackgroundBtn") return "reset";
+  if (id === "resetConfigBtn") return "reset";
   if (id === "enableAllToolsBtn") return "switch-on";
   if (id === "disableAllToolsBtn") return "switch-off";
   if (id === "paletteToggleBtn" || id === "appearanceToggleBtn") return "switch";
-  if (id === "backgroundAudioBtn" || id === "soundFeedbackBtn") return "switch";
-  if (id === "customBackgroundBtn" || id === "replaceBackgroundAudioBtn") return "confirm";
+  if (id === "soundFeedbackBtn") return "switch";
   if (button?.classList?.contains("tool-action")) return "";
   return button?.classList?.contains("btn-primary") ? "confirm" : "tap";
 }
@@ -845,109 +323,13 @@ function buttonSoundKind(button) {
 function unlockAudioFeedback() {
   audioUnlocked = true;
   ensureAudioContext();
-  if (pendingBackgroundAudioPlay) {
-    pendingBackgroundAudioPlay = false;
-    playBackgroundAudio().catch(() => {});
-  }
-  if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
-}
-
-async function applyMediaAudioMode(mode, { persist = true, autoplayAudio = true } = {}) {
-  mediaAudioMode = normalizeMediaAudioMode(mode);
-  syncLegacyAudioFlags();
-  const audio = document.getElementById("backgroundAudio");
-  const allMediaAudioOff = mediaAudioMode === "off";
-  const wantsAudio = isBackgroundAudioEnabled();
-  if (!allMediaAudioOff && wantsAudio && hasBackgroundAudio()) {
-    if (autoplayAudio) {
-      unlockAudioFeedback();
-      await playBackgroundAudio().catch(() => {
-        pendingBackgroundAudioPlay = true;
-        showToast("浏览器阻止自动播放背景音，请再点击一次");
-      });
-    }
-  } else {
-    audio?.pause();
-    pendingBackgroundAudioPlay = false;
-    if (backgroundAudioMedia) backgroundAudioMedia.enabled = false;
-  }
-  if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
-  refreshAudioControls();
-  if (persist) await saveUiPreferences();
-}
-
-async function cycleMediaAudioMode() {
-  const hasVideo = hasVideoBackground();
-  const hasAudio = hasBackgroundAudio();
-  if (!hasVideo && !hasAudio) {
-    document.getElementById("backgroundAudioInput")?.click();
-    return;
-  }
-  const modes = availableMediaAudioModes();
-  const current = normalizeMediaAudioMode(mediaAudioMode);
-  const currentIndex = modes.includes(current) ? modes.indexOf(current) : 0;
-  const next = modes[(currentIndex + 1) % modes.length];
-  await applyMediaAudioMode(next);
-  showToast(`媒体音效：${MEDIA_AUDIO_LABELS[next] || next}`);
-}
-
-async function playBackgroundAudio() {
-  return false;
-  const audio = document.getElementById("backgroundAudio");
-  const source = mediaSource(backgroundAudioMedia);
-  if (!audio || !source) return false;
-  if (audio.src !== source) audio.src = source;
-  audio.volume = 0.42;
-  await audio.play();
-  if (backgroundAudioMedia) backgroundAudioMedia.enabled = true;
-  if (mediaAudioMode === "video" && !hasVideoBackground()) mediaAudioMode = "audio";
-  if (mediaAudioMode === "off") mediaAudioMode = hasVideoBackground() ? "both" : "audio";
-  refreshAudioControls();
-  if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
-  return true;
-}
-
-function applyBackgroundAudio(media, { autoplay = false } = {}) {
-  backgroundAudioMedia = media && mediaSource(media) ? { ...media } : null;
-  if (backgroundAudioMedia?.enabled && mediaAudioMode === "video" && !hasVideoBackground()) mediaAudioMode = "audio";
-  const audio = document.getElementById("backgroundAudio");
-  if (audio) {
-    audio.pause();
-    const source = mediaSource(backgroundAudioMedia);
-    if (source) audio.src = source;
-    else audio.removeAttribute("src");
-  }
-  pendingBackgroundAudioPlay = Boolean(autoplay && backgroundAudioMedia?.enabled && mediaAudioMode !== "off");
-  if (pendingBackgroundAudioPlay && audioUnlocked) {
-    pendingBackgroundAudioPlay = false;
-    playBackgroundAudio().catch(() => {});
-  }
-  refreshAudioControls();
-  if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
 }
 
 function refreshThemeControls() {
-  const custom = backgroundMode === "custom";
-  const backgroundKind = custom
-    ? (backgroundTypeForMedia(backgroundMedia) || backgroundTypeForSource(customBackgroundUrl) || "image")
-    : "preset";
-  const hasCustomBackground = Boolean(backgroundMedia || customBackgroundUrl);
   const paletteLabel = document.getElementById("paletteModeLabel");
   const appearanceLabel = document.getElementById("appearanceModeLabel");
-  const backgroundLabel = document.getElementById("backgroundModeLabel");
-  const backgroundButton = document.getElementById("customBackgroundBtn");
   if (paletteLabel) paletteLabel.textContent = PALETTE_LABELS[paletteMode] || "石墨";
   if (appearanceLabel) appearanceLabel.textContent = APPEARANCE_LABELS[appearanceMode] || "自动";
-  if (backgroundLabel) backgroundLabel.textContent = custom ? (BACKGROUND_KIND_LABELS[backgroundKind] || "自定义") : (hasCustomBackground ? "可启用" : "上传");
-  backgroundButton?.classList.toggle("media-active", custom);
-  if (backgroundButton) {
-    backgroundButton.title = hasRestorableLocalVideo(backgroundMedia)
-      ? "重新选择上次本地视频以续播"
-      : "上传自定义背景并识别背景类型";
-  }
-  document.getElementById("presetBackgroundBtn")?.toggleAttribute("disabled", !custom);
-  document.documentElement.dataset.backgroundMode = custom ? "custom" : "preset";
-  document.documentElement.dataset.backgroundKind = backgroundKind;
   refreshAudioControls();
   refreshCardTransparencyControls();
 }
@@ -962,45 +344,6 @@ function applyAppearance(mode = getStoredAppearanceMode()) {
   appearanceMode = APPEARANCE_MODES.includes(mode) ? mode : "auto";
   document.documentElement.dataset.appearance = appearanceMode;
   document.documentElement.dataset.theme = resolveAppearance(appearanceMode);
-  refreshThemeControls();
-}
-
-function applyCustomBackground(url) {
-  const source = String(url || "");
-  applyBackgroundMedia(source ? { kind: "image", mime: "image/jpeg", data_url: source, filename: "legacy-background" } : null);
-}
-
-function applyBackgroundMedia(media) {
-  media = null;
-  const source = mediaSource(media);
-  const storedVideo = hasStoredVideoBackground(media) || hasRestorableLocalVideo(media);
-  backgroundMedia = (source || storedVideo) ? { ...media } : null;
-  customBackgroundUrl = source;
-  if (source || storedVideo) {
-    backgroundMode = "custom";
-    backgroundMediaEnabled = true;
-    if (backgroundMedia.kind === "video" && backgroundAudioMedia && backgroundAudioMedia.enabled !== true && mediaAudioMode === "audio") {
-      mediaAudioMode = "video";
-    }
-    syncLegacyAudioFlags();
-    if (backgroundMedia.kind === "video") {
-      document.documentElement.style.removeProperty("--custom-bg-image");
-      if (source) refreshBackgroundVideo(backgroundMedia);
-      else resetBackgroundVideo({ revoke: false });
-    } else {
-      resetBackgroundVideo();
-      document.documentElement.style.setProperty("--custom-bg-image", `url("${source}")`);
-    }
-  } else {
-    backgroundMode = "preset";
-    backgroundMediaEnabled = false;
-    customBackgroundUrl = "";
-    backgroundMedia = null;
-    resetBackgroundVideo();
-    document.documentElement.style.removeProperty("--custom-bg-image");
-  }
-  applyPalette(paletteMode);
-  applyAppearance(appearanceMode);
   refreshThemeControls();
 }
 
@@ -1032,8 +375,6 @@ async function loadUiPreferences() {
     const prefs = data.preferences || {};
     const palette = prefs.palette_mode;
     const appearance = prefs.appearance_mode;
-    const bgMode = prefs.background_mode;
-    const bgUrl = prefs.custom_background_url;
     if (PALETTE_MODES.includes(palette)) {
       paletteMode = palette;
       savePaletteLocally(palette);
@@ -1043,58 +384,14 @@ async function loadUiPreferences() {
       saveAppearanceLocally(appearance);
     }
     uiSoundEnabled = prefs.ui_sound_enabled !== false;
-    mediaAudioMode = MEDIA_AUDIO_MODES.includes(prefs.media_audio_mode) ? prefs.media_audio_mode : "video";
-    videoSoundEnabled = prefs.video_sound_enabled === true;
-    videoSoundUserSet = prefs.video_sound_user_set === true;
     cardTransparency = clampCardTransparency(
       prefs.card_transparency === undefined ? getStoredCardTransparency() : prefs.card_transparency
     );
     saveCardTransparencyLocally(cardTransparency);
     applyCardTransparency(cardTransparency);
-    const savedBackgroundMedia = prefs.background_media || null;
-    savedLocalVideoMedia = savedBackgroundMedia?.local_id ? { ...savedBackgroundMedia } : null;
-    backgroundMedia = await hydrateStoredMedia(savedBackgroundMedia);
-    backgroundAudioMedia = prefs.background_audio || null;
-    if (!MEDIA_AUDIO_MODES.includes(prefs.media_audio_mode)) {
-      if (videoSoundEnabled && backgroundAudioMedia?.enabled) mediaAudioMode = "both";
-      else if (backgroundAudioMedia?.enabled) mediaAudioMode = "audio";
-      else mediaAudioMode = "video";
-    }
-    customBackgroundUrl = mediaSource(backgroundMedia) || String(bgUrl || "");
-    if (!customBackgroundUrl && !backgroundMedia) {
-      try { customBackgroundUrl = localStorage.getItem("irmia_devkit_custom_bg") || ""; } catch { customBackgroundUrl = ""; }
-      if (customBackgroundUrl) {
-        backgroundMedia = { kind: "image", mime: "image/jpeg", data_url: customBackgroundUrl, filename: "cropped-background" };
-      }
-    }
-    backgroundMediaEnabled = prefs.background_media_enabled !== false;
-    const hasPlayableLocalVideo = Boolean(backgroundMedia?.local_id && mediaSource(backgroundMedia));
-    const hasRestorableLocal = hasRestorableLocalVideo(backgroundMedia);
-    const hasSavedBackground = Boolean((backgroundMedia && (!backgroundMedia.local_id || hasPlayableLocalVideo || hasRestorableLocal || backgroundMedia.storage || mediaSource(backgroundMedia))) || customBackgroundUrl);
-    backgroundMode = hasSavedBackground
-      ? (backgroundMediaEnabled ? "custom" : "preset")
-      : (BACKGROUND_MODES.includes(bgMode) ? bgMode : "preset");
-    applyBackgroundAudio(backgroundAudioMedia, { autoplay: true });
-    if (backgroundMode === "custom" && ((backgroundMedia && (mediaSource(backgroundMedia) || hasStoredVideoBackground(backgroundMedia) || hasRestorableLocalVideo(backgroundMedia))) || customBackgroundUrl)) {
-      if (backgroundMedia) applyBackgroundMedia(backgroundMedia);
-      else applyCustomBackground(customBackgroundUrl);
-      return;
-    }
-    if (hasSavedBackground) {
-      resetBackgroundVideo({ revoke: false });
-      document.documentElement.style.removeProperty("--custom-bg-image");
-      applyPalette(paletteMode);
-      applyAppearance(appearanceMode);
-      refreshAudioControls();
-      return;
-    }
   } catch (e) {
     console.warn("loadUiPreferences", e);
   }
-  backgroundMode = "preset";
-  backgroundMediaEnabled = false;
-  backgroundMedia = null;
-  customBackgroundUrl = "";
   applyPalette(paletteMode);
   applyAppearance(appearanceMode);
   refreshAudioControls();
@@ -1102,211 +399,16 @@ async function loadUiPreferences() {
 
 async function saveUiPreferences() {
   if (!api) return;
-  syncLegacyAudioFlags();
   try {
     await api.safePost("ui_preferences/save", {
       palette_mode: paletteMode,
       appearance_mode: appearanceMode,
-      background_mode: backgroundMode,
-      background_media_enabled: backgroundMediaEnabled,
-      background_media: persistableMedia(backgroundMedia),
-      background_audio: persistableMedia(backgroundAudioMedia),
-      media_audio_mode: mediaAudioMode,
       ui_sound_enabled: uiSoundEnabled,
-      video_sound_enabled: videoSoundEnabled,
-      video_sound_user_set: videoSoundUserSet,
       card_transparency: cardTransparency,
-      custom_background_url: backgroundMedia?.storage || backgroundMedia?.local_id ? "" : (customBackgroundUrl || ""),
     });
   } catch (e) {
     console.warn("saveUiPreferences", e);
   }
-}
-
-function activateStoredCustomBackground() {
-  if (!backgroundMedia && !customBackgroundUrl) return false;
-  backgroundMediaEnabled = true;
-  if (backgroundMedia) applyBackgroundMedia(backgroundMedia);
-  else applyCustomBackground(customBackgroundUrl);
-  saveUiPreferences();
-  showToast("已启用上次上传的背景");
-  return true;
-}
-
-function handleBackgroundButtonClick() {
-  if (backgroundMode === "custom") {
-    if (hasRestorableLocalVideo(backgroundMedia)) showToast("请选择上次本地视频以恢复播放进度");
-    document.getElementById("customBackgroundInput")?.click();
-    return;
-  }
-  if (activateStoredCustomBackground()) return;
-  document.getElementById("customBackgroundInput")?.click();
-}
-
-async function switchToPresetBackground() {
-  backgroundMode = "preset";
-  backgroundMediaEnabled = false;
-  resetBackgroundVideo({ revoke: false });
-  document.documentElement.style.removeProperty("--custom-bg-image");
-  applyPalette(paletteMode);
-  applyAppearance(appearanceMode);
-  refreshThemeControls();
-  await saveUiPreferences();
-  showToast("已恢复预设背景");
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("图片读取失败"));
-    reader.readAsDataURL(file);
-  });
-}
-
-const CUSTOM_BACKGROUND_SIZE = { width: 1920, height: 1080, quality: 0.86 };
-
-function loadImageFromDataUrl(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("图片加载失败"));
-    image.src = dataUrl;
-  });
-}
-
-async function cropBackgroundFile(file) {
-  if (!file?.type?.startsWith("image/")) throw new Error("请选择图片文件");
-  if (file.size > 12 * 1024 * 1024) throw new Error("图片不能超过 12MB");
-  const dataUrl = await fileToDataUrl(file);
-  const image = await loadImageFromDataUrl(dataUrl);
-  const { width, height, quality } = CUSTOM_BACKGROUND_SIZE;
-  const targetRatio = width / height;
-  const sourceRatio = image.width / image.height;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  let coverSx = 0, coverSy = 0, coverSw = image.width, coverSh = image.height;
-  if (sourceRatio > targetRatio) {
-    coverSw = image.height * targetRatio;
-    coverSx = (image.width - coverSw) / 2;
-  } else {
-    coverSh = image.width / targetRatio;
-    coverSy = (image.height - coverSh) / 2;
-  }
-  ctx.save();
-  ctx.filter = "blur(28px) saturate(1.08) brightness(0.82)";
-  ctx.drawImage(image, coverSx, coverSy, coverSw, coverSh, -36, -36, width + 72, height + 72);
-  ctx.restore();
-  let drawW = width;
-  let drawH = height;
-  if (sourceRatio > targetRatio) drawH = width / sourceRatio;
-  else drawW = height * sourceRatio;
-  const dx = (width - drawW) / 2;
-  const dy = (height - drawH) / 2;
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,.34)";
-  ctx.shadowBlur = 34;
-  ctx.shadowOffsetY = 8;
-  ctx.drawImage(image, dx, dy, drawW, drawH);
-  ctx.restore();
-  return canvas.toDataURL("image/jpeg", quality);
-}
-
-async function handleCustomBackgroundUpload(event) {
-  const file = event.currentTarget.files?.[0];
-  event.currentTarget.value = "";
-  if (!file) return;
-  try {
-    if (file.type?.startsWith("image/")) {
-      showToast("正在裁切并保存背景图...");
-      applyCustomBackground(await cropBackgroundFile(file));
-      try { localStorage.setItem("irmia_devkit_custom_bg", customBackgroundUrl || ""); } catch { /* ignore quota */ }
-      await saveUiPreferences();
-      showToast("自定义背景已启用");
-      return;
-    }
-    showToast(isVideoFile(file) ? "正在载入本地视频..." : "正在保存背景媒体...");
-    if (isVideoFile(file)) setStartupLoading("缓存视频", "正在准备本地视频背景");
-    const media = isVideoFile(file)
-      ? await uploadChunkedMedia("background", file)
-      : attachUploadedVideoSource(await uploadMedia("media/background/upload", file), file);
-    applyBackgroundMedia(media);
-    await saveUiPreferences();
-    showToast(media.kind === "video" ? "本地视频背景已启用" : "自定义背景已启用");
-  } catch (e) {
-    console.error("handleCustomBackgroundUpload", e);
-    hideStartupLoading();
-    showToast(e.message || "背景处理失败");
-  }
-}
-
-async function uploadMedia(endpoint, file) {
-  if (bridge?.upload) {
-    const result = await bridge.upload(endpoint, file);
-    if (result?.ok === false) throw new Error(result.error || "媒体上传失败");
-    const media = result?.media || result;
-    if (!media?.kind) throw new Error("媒体响应缺少类型");
-    if (!mediaSource(media) && media.kind !== "video") throw new Error("媒体响应缺少可播放数据");
-    return media;
-  }
-  const dataUrl = await fileToDataUrl(file);
-  const kind = mediaKindForFile(file) || "image";
-  return { kind, mime: file.type || mimeFromExtension(file.name) || "application/octet-stream", filename: file.name, data_url: dataUrl };
-}
-
-function handleBackgroundAudioButtonClick() {
-  if (!backgroundAudioMedia) {
-    document.getElementById("backgroundAudioInput")?.click();
-    return;
-  }
-  const audio = document.getElementById("backgroundAudio");
-  if (audio?.paused) {
-    unlockAudioFeedback();
-    playBackgroundAudio()
-      .then(() => saveUiPreferences())
-      .catch(() => showToast("背景音播放被浏览器拦截，请再点击一次"));
-  } else {
-    audio?.pause();
-    if (backgroundAudioMedia) backgroundAudioMedia.enabled = false;
-    refreshAudioControls();
-    if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
-    saveUiPreferences();
-    showToast("背景音已暂停");
-  }
-}
-
-async function handleBackgroundAudioUpload(event) {
-  const file = event.currentTarget.files?.[0];
-  event.currentTarget.value = "";
-  if (!file) return;
-  try {
-    showToast("正在保存背景音...");
-    const media = await uploadMedia("media/audio/upload", file);
-    media.enabled = true;
-    mediaAudioMode = "audio";
-    applyBackgroundAudio(media, { autoplay: true });
-    unlockAudioFeedback();
-    await playBackgroundAudio().catch(() => {});
-    await saveUiPreferences();
-    showToast("背景音已启用");
-  } catch (e) {
-    console.error("handleBackgroundAudioUpload", e);
-    showToast(e.message || "背景音处理失败");
-  }
-}
-
-async function toggleVideoSound() {
-  if (!hasVideoBackground()) {
-    showToast("请先上传视频背景");
-    return;
-  }
-  videoSoundUserSet = true;
-  videoSoundEnabled = !getEffectiveVideoSoundEnabled();
-  refreshBackgroundVideo(backgroundMedia);
-  await saveUiPreferences();
-  showToast(videoSoundEnabled ? "视频原声已开启" : "视频原声已静音");
 }
 
 function handleCardTransparencyInput(event) {
@@ -1366,17 +468,9 @@ async function init() {
 
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
   document.getElementById("appearanceToggleBtn")?.addEventListener("click", cycleAppearanceMode);
-  document.getElementById("customBackgroundBtn")?.addEventListener("click", handleBackgroundButtonClick);
-  document.getElementById("customBackgroundInput")?.addEventListener("change", handleCustomBackgroundUpload);
-  document.getElementById("backgroundAudioBtn")?.addEventListener("click", cycleMediaAudioMode);
   document.getElementById("cardTransparencyInput")?.addEventListener("input", handleCardTransparencyInput);
   document.getElementById("cardTransparencyInput")?.addEventListener("change", handleCardTransparencyChange);
-  document.getElementById("replaceBackgroundAudioBtn")?.addEventListener("click", () => {
-    document.getElementById("backgroundAudioInput")?.click();
-  });
-  document.getElementById("backgroundAudioInput")?.addEventListener("change", handleBackgroundAudioUpload);
   document.getElementById("soundFeedbackBtn")?.addEventListener("click", toggleUiSoundFeedback);
-  document.getElementById("presetBackgroundBtn")?.addEventListener("click", switchToPresetBackground);
   document.addEventListener("pointerdown", unlockAudioFeedback, { once: true, capture: true });
   document.addEventListener("keydown", unlockAudioFeedback, { once: true, capture: true });
   document.addEventListener("click", event => {
@@ -1385,36 +479,6 @@ async function init() {
     const soundKind = buttonSoundKind(button);
     if (soundKind) playUiSound(soundKind);
   }, true);
-  const backgroundAudio = document.getElementById("backgroundAudio");
-  backgroundAudio?.addEventListener("play", () => {
-    refreshAudioControls();
-    if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
-  });
-  backgroundAudio?.addEventListener("pause", () => {
-    refreshAudioControls();
-    if (hasVideoBackground()) refreshBackgroundVideo(backgroundMedia);
-  });
-  const backgroundVideo = document.getElementById("customBackgroundVideo");
-  backgroundVideo?.addEventListener("play", startVideoProgressHeartbeat);
-  backgroundVideo?.addEventListener("playing", startVideoProgressHeartbeat);
-  backgroundVideo?.addEventListener("timeupdate", scheduleVideoPlaybackProgressSave);
-  backgroundVideo?.addEventListener("seeked", () => {
-    if (!markVideoProgressRestored(backgroundVideo)) return;
-    saveVideoPlaybackProgress({ syncPreferences: true });
-  });
-  backgroundVideo?.addEventListener("pause", () => {
-    stopVideoProgressHeartbeat();
-    saveVideoPlaybackProgress({ syncPreferences: true });
-  });
-  backgroundVideo?.addEventListener("ended", () => {
-    stopVideoProgressHeartbeat();
-    saveVideoPlaybackProgress({ syncPreferences: true });
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") flushVideoPlaybackProgressSave();
-  });
-  window.addEventListener("pagehide", flushVideoPlaybackProgressSave);
-  window.addEventListener("beforeunload", flushVideoPlaybackProgressSave);
   window.addEventListener("beforeunload", flushCardTransparencySave);
   document.getElementById("refreshGroupsBtn")?.addEventListener("click", async () => {
     await loadContacts();
@@ -1443,6 +507,10 @@ async function init() {
   });
   document.querySelectorAll(".nav-jump").forEach(button => {
     button.addEventListener("click", () => {
+      if (!currentConfig) {
+        showToast("请先选择配置对象");
+        return;
+      }
       document.querySelectorAll(".nav-jump").forEach(item => item.classList.toggle("active", item === button));
       const target = document.getElementById(`section-${button.dataset.jump}`);
       target?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1555,8 +623,9 @@ async function loadContacts() {
 }
 
 function groupAvatarHtml(item) {
-  if (item.avatar) {
-    return `<img class="group-avatar" src="${escapeHtml(item.avatar)}" alt="">`;
+  const avatar = String(item.avatar || "").trim();
+  if (/^https?:\/\//i.test(avatar) || /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(avatar)) {
+    return `<img class="group-avatar" src="${escapeHtml(avatar)}" alt="" referrerpolicy="no-referrer">`;
   }
   const text = item.isDefault ? "全" : item.kind === "private" ? "私" : "群";
   return `<div class="group-avatar-placeholder">${text}</div>`;
@@ -1577,7 +646,7 @@ function renderContactSection(key, title, items) {
   const collapsed = collapsedMenus[key];
   const body = collapsed
     ? ""
-    : (visibleItems.length ? visibleItems.map(renderContactItem).join("") : `<div class="group-empty">暂无匹配的${title}</div>`);
+    : (visibleItems.length ? visibleItems.map(renderContactItem).join("") : `<div class="group-empty">暂无匹配的${escapeHtml(title)}</div>`);
   return `
     <section class="contact-section ${collapsed ? "collapsed" : ""}">
       <button class="contact-section-head" type="button" data-menu="${key}">
@@ -1629,16 +698,20 @@ function renderGroupList() {
 }
 
 async function selectGroup(groupId) {
+  const requestId = ++groupRequestId;
   selectedGroupId = groupId;
+  currentConfig = null;
   activeGroupFilter = "all";
   renderGroupList();
+  renderConfigPanel();
   try {
     const data = await api.safeGet("group_config", { group_id: groupId });
-    if (data.ok) {
-      currentConfig = normalizeConfig(data.config || {});
-      renderConfigPanel();
-    }
+    if (requestId !== groupRequestId) return;
+    if (!data.ok) throw new Error("group_config failed");
+    currentConfig = normalizeConfig({ ...data.config, group_id: groupId });
+    renderConfigPanel();
   } catch (e) {
+    if (requestId !== groupRequestId) return;
     console.error("selectGroup", e);
     showToast("配置加载失败");
   }
@@ -1911,7 +984,7 @@ function renderConfigPanel() {
     <div class="dashboard-content">
       <section class="welcome-row" id="section-overview-top">
         <div>
-          <p class="eyebrow">Irmia DevKit</p>
+          <p class="eyebrow">弥亚开发工具箱</p>
           <h2>Welcome back, ${escapeHtml(target.name)}</h2>
           <span>${escapeHtml(target.kind)}配置 · ${escapeHtml(target.hint)}</span>
         </div>
@@ -1965,7 +1038,16 @@ function renderConfigPanel() {
 }
 
 function bindConfigEvents() {
-  document.querySelectorAll(".group-toggle").forEach(input => {
+  const panel = document.getElementById("configPanel");
+  panel.querySelector("#extraAdminIds")?.addEventListener("input", event => {
+    currentConfig.extra_admin_ids = event.currentTarget.value;
+  });
+  panel.querySelectorAll(".path-input[data-path-key]").forEach(input => {
+    input.addEventListener("input", event => {
+      pathOptions[event.currentTarget.dataset.pathKey] = event.currentTarget.value;
+    });
+  });
+  panel.querySelectorAll(".group-toggle").forEach(input => {
     input.addEventListener("change", event => {
       const groupName = event.currentTarget.dataset.group;
       const enabled = event.currentTarget.checked;
@@ -1977,7 +1059,7 @@ function bindConfigEvents() {
     });
   });
 
-  document.querySelectorAll(".tool-action").forEach(button => {
+  panel.querySelectorAll(".tool-action").forEach(button => {
     button.addEventListener("click", event => {
       const toolId = event.currentTarget.dataset.tool;
       const disabledSet = new Set(currentConfig.disabled_tools || []);
@@ -1989,14 +1071,14 @@ function bindConfigEvents() {
     });
   });
 
-  document.querySelectorAll(".group-filter").forEach(button => {
+  panel.querySelectorAll(".group-filter").forEach(button => {
     button.addEventListener("click", event => {
       activeGroupFilter = event.currentTarget.dataset.group || "all";
       renderConfigPanel();
     });
   });
 
-  document.querySelectorAll(".segment-button[data-chart-mode]").forEach(button => {
+  panel.querySelectorAll(".segment-button[data-chart-mode]").forEach(button => {
     button.addEventListener("click", event => {
       chartMode = event.currentTarget.dataset.chartMode === "group" ? "group" : "live";
       renderConfigPanel();
@@ -2004,7 +1086,7 @@ function bindConfigEvents() {
     });
   });
 
-  document.querySelectorAll("[data-breakdown-toggle]").forEach(button => {
+  panel.querySelectorAll("[data-breakdown-toggle]").forEach(button => {
     button.addEventListener("click", () => {
       breakdownExpanded = !breakdownExpanded;
       renderConfigPanel();
@@ -2015,12 +1097,12 @@ function bindConfigEvents() {
   document.getElementById("enableAllToolsBtn")?.addEventListener("click", async () => {
     setAllToolsState(true);
     renderConfigPanel();
-    await persistConfig("已开启全部工具");
+    showToast("已开启全部工具，记得保存");
   });
   document.getElementById("disableAllToolsBtn")?.addEventListener("click", async () => {
     setAllToolsState(false);
     renderConfigPanel();
-    await persistConfig("已关闭全部工具");
+    showToast("已关闭全部工具，记得保存");
   });
   document.getElementById("saveConfigBtn")?.addEventListener("click", saveConfig);
   document.getElementById("resetConfigBtn")?.addEventListener("click", resetConfig);
@@ -2083,24 +1165,26 @@ function sortContacts(items, keepDefault = false) {
 }
 
 async function persistConfig(message = "配置已保存，立即生效") {
+  if (!currentConfig || !selectedGroupId) return false;
+  const savingConfig = currentConfig;
   const adminInput = document.getElementById("extraAdminIds");
   if (adminInput) currentConfig.extra_admin_ids = adminInput.value.trim();
   const payload = {
     group_id: selectedGroupId,
     extra_admin_ids: currentConfig.extra_admin_ids,
-    tool_groups: currentConfig.tool_groups,
-    disabled_tools: currentConfig.disabled_tools,
+    tool_groups: { ...currentConfig.tool_groups },
+    disabled_tools: [...currentConfig.disabled_tools],
   };
   try {
     const data = await api.safePost("group_config/save", payload);
     if (data.ok) {
-      if (currentConfig && selectedGroupId) {
-        currentConfig = normalizeConfig(payload);
+      // Keep edits made while the save request was in flight.
+      if (currentConfig === savingConfig && selectedGroupId === payload.group_id) {
         renderConfigPanel();
       }
       playUiSound("save");
       showToast(message);
-      touchCurrentGroup();
+      if (selectedGroupId === payload.group_id) touchCurrentGroup();
       await loadContacts();
       return true;
     }
@@ -2127,7 +1211,7 @@ async function resetConfig() {
   for (const groupName of Object.keys(toolGroupsDef)) toolGroups[groupName] = true;
   currentConfig = { group_id: selectedGroupId, extra_admin_ids: "", tool_groups: toolGroups, disabled_tools: [] };
   renderConfigPanel();
-  await persistConfig("已重置并保存");
+  showToast("已重置当前配置，记得保存");
 }
 
 function showToast(message) {
