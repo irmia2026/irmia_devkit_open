@@ -21,6 +21,7 @@ def set_config(cfg: dict, plugin_dir: str = "") -> None:
     _config.setdefault("backup_dir", default_backup_dir)
     _config.setdefault("gh_path", "")
     _config.setdefault("es_path", "")
+    _config.setdefault("custom_workspace", "")
     _config.setdefault("op_log_db", "")
 
 

@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem, prune_backups
+from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem, prune_backups, custom_workspace_allows
 from .safe_edit import _backup_dir
 from .file_remove import _FORBIDDEN_PREFIXES
 
@@ -44,12 +44,19 @@ def _preview(content: str, n: int = _PREVIEW_LINES) -> dict:
 
 
 def _check_forbidden(p: Path, raw: str) -> dict | None:
-    """复用 file_remove 的路径沙箱：拒绝 .. 穿越和系统目录写入。"""
+    """复用 file_remove 的路径沙箱：拒绝 .. 穿越和系统目录写入。
+
+    配置了自定义工作区（custom_workspace）且路径位于其内时放行，
+    用于工作区本身位于系统目录等危险区域的场景。.. 穿越
+    检查不受放行影响，始终最先生效。
+    """
     # 在 Path 解析之前检查原始字符串，防止 Path.normalize() 消除 ..
     if ".." in raw.replace("\\", "/").split("/"):
         return {"ok": False, "error": "路径包含 .. 穿越，已被拒绝"}
 
     path_str = str(p).replace("\\", "/")
+    if custom_workspace_allows(path_str):
+        return None
     for forbidden in _FORBIDDEN_PREFIXES:
         forbidden_norm = forbidden.replace("\\", "/")
         if path_str.lower().startswith(forbidden_norm.lower() + "/") or path_str.lower() == forbidden_norm.lower():

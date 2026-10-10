@@ -224,8 +224,50 @@ def is_binary_file(path: str | Path, sample_size: int = 8192) -> tuple[bool, str
     return False, "unknown"
 
 
+def _custom_workspace_root() -> str | None:
+    """读取配置的 custom_workspace（自定义工作区目录）。
+
+    返回规范化后的绝对路径字符串（统一正斜杠）；未配置、为空、
+    或指向文件系统根（"/"、"C:/" 等 —— 放行整盘等于关闭全部保护）
+    时返回 None。支持 ~ 展开；相对路径按进程当前目录解析，
+    建议配置绝对路径。
+    """
+    from .config import get_config
+
+    ws = str(get_config().get("custom_workspace", "") or "").strip()
+    if not ws:
+        return None
+    try:
+        p = Path(ws).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if len(p.parts) <= 1:
+        return None
+    return str(p).replace("\\", "/")
+
+
+def custom_workspace_allows(path_str: str) -> bool:
+    """判断已规范化的绝对路径（统一正斜杠）是否位于自定义工作区内。
+
+    未配置时恒为 False —— 默认行为与未引入本功能前完全一致。
+    边界按 "前缀 + /" 匹配，/x/workspace-evil 不会被 /x/workspace 误放行；
+    比对大小写不敏感（与 _FORBIDDEN_PREFIXES 判定方式一致）。
+    """
+    ws = _custom_workspace_root()
+    if not ws:
+        return False
+    low = path_str.lower()
+    ws_low = ws.lower()
+    return low == ws_low or low.startswith(ws_low + "/")
+
+
 def _check_path_safety(path: str | Path, *, read: bool = True) -> dict | None:
-    """统一路径安全校验：拒绝 .. 穿越和系统目录访问。"""
+    """统一路径安全校验：拒绝 .. 穿越和系统目录访问。
+
+    配置了自定义工作区（custom_workspace）且路径位于其内时，
+    跳过系统目录拦截 —— 用于工作区本身位于系统目录等危险区域的场景。
+    .. 穿越检查不受放行影响，始终最先生效。
+    """
     raw = str(path).replace("\\", "/")
     if ".." in raw.split("/"):
         return {"ok": False, "error": "路径包含 .. 穿越，已被拒绝"}
@@ -233,6 +275,9 @@ def _check_path_safety(path: str | Path, *, read: bool = True) -> dict | None:
     p = Path(path).resolve()
     path_str = str(p).replace("\\", "/")
     from .file_remove import _FORBIDDEN_PREFIXES
+
+    if custom_workspace_allows(path_str):
+        return None
 
     for forbidden in _FORBIDDEN_PREFIXES:
         forbidden_norm = forbidden.replace("\\", "/")

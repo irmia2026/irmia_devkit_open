@@ -80,6 +80,12 @@
             "description": "safe_edit 备份目录",
             "type": "string",
             "default": ""
+          },
+          "custom_workspace": {
+            "description": "自定义工作区目录（可选）。工作区/项目本身位于插件默认拦截的系统目录（/usr、/etc、/root、C:\\Program Files 等）内时，填写工作区根目录可放行其中的文件，让安全编辑链（safe_edit/safe_write/multi_edit/file_patch/file_preview/safe_rollback）与配套读取（safe_read/file_diff/file_hash）正常工作。",
+            "hint": "留空不启用，行为不变。仅放行编辑与读取；file_remove/file_move 删除移动始终拦截系统目录；勿填 / 或盘符根（会被忽略）；建议填绝对路径。",
+            "type": "string",
+            "default": ""
           }
         }
       }
