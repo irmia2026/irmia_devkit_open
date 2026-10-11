@@ -31,6 +31,7 @@ _DEFAULT_CONFIG = {
     "es_path": "",
     "gh_path": "",
     "backup_dir": "",
+    "custom_workspace": "",
 }
 
 
@@ -102,7 +103,7 @@ class Main(star.Star):
             paths = web_config.get("paths", {})
             if not isinstance(paths, dict):
                 paths = {}
-            for key in ("es_path", "gh_path", "backup_dir"):
+            for key in ("es_path", "gh_path", "backup_dir", "custom_workspace"):
                 value = paths.get(key) or web_config.get(key, "")
                 if value:
                     _config[key] = value

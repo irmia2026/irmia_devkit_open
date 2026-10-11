@@ -207,13 +207,13 @@ class DevkitWebController:
         return self._jsonify({"ok": True})
 
     async def page_path_options(self):
-        keys = ("es_path", "gh_path", "backup_dir")
+        keys = ("es_path", "gh_path", "backup_dir", "custom_workspace")
         data = self._read_main_config()
         return self._jsonify({"ok": True, "paths": {k: str(data.get(k, "") or "") for k in keys}})
 
     async def page_save_path_options(self):
         payload = await self._request().get_json(force=True, silent=True) or {}
-        keys = ("es_path", "gh_path", "backup_dir")
+        keys = ("es_path", "gh_path", "backup_dir", "custom_workspace")
         data = self._read_main_config()
         for key in keys:
             data[key] = str(payload.get(key, "") or "").strip()

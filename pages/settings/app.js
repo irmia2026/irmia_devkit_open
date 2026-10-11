@@ -21,7 +21,7 @@ let contactsData = [];
 let selectedGroupId = "";
 let currentConfig = null;
 let globalAdminIds = [];
-let pathOptions = { es_path: "", gh_path: "", backup_dir: "" };
+let pathOptions = { es_path: "", gh_path: "", backup_dir: "", custom_workspace: "" };
 const collapsedMenus = { groups: true, contacts: true };
 const DEFAULT_GROUP = { id: "__default__", name: "全局设置", avatar: "", updated_at: Number.MAX_SAFE_INTEGER, isDefault: true, kind: "global" };
 
@@ -405,6 +405,7 @@ function renderPathOptionsPanel() {
       <label><span>Everything CLI</span><input class="input-field path-input" data-path-key="es_path" value="${pathValue("es_path")}" placeholder="留空自动检测 es.exe"></label>
       <label><span>GitHub CLI</span><input class="input-field path-input" data-path-key="gh_path" value="${pathValue("gh_path")}" placeholder="留空自动检测 gh.exe"></label>
       <label><span>备份目录</span><input class="input-field path-input" data-path-key="backup_dir" value="${pathValue("backup_dir")}" placeholder="留空使用默认备份目录"></label>
+      <label><span>自定义工作区</span><input class="input-field path-input" data-path-key="custom_workspace" value="${pathValue("custom_workspace")}" placeholder="留空不启用；工作区在系统目录内时填写"></label>
     </div>
   </section>`;
 }
