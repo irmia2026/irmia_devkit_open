@@ -1283,6 +1283,10 @@ class GhPrTool(FunctionTool):
                     "enum": ["create", "list", "merge", "view", "review"],
                 },
                 "cwd": {"type": "string", "description": "仓库路径，默认当前工作目录"},
+                "owner_repo": {
+                    "type": "string",
+                    "description": "仓库，格式 owner/repo（可选）。传了就按 --repo 直接指定，不需要本地 git 仓库",
+                },
                 "title": {"type": "string", "description": "PR 标题（create 时必填）"},
                 "body": {"type": "string", "description": "PR 正文（create 时可选）"},
                 "number": {
@@ -1320,6 +1324,7 @@ class GhPrTool(FunctionTool):
         context: ContextWrapper[AstrAgentContext],
         action: str,
         cwd: str = "",
+        owner_repo: str = "",
         title: str = "",
         body: str = "",
         number: int = 0,
@@ -1338,23 +1343,25 @@ class GhPrTool(FunctionTool):
                     if not title:
                         return _err("gh_pr create 需要 title 参数")
                     result = await _run_sync(
-                        _gh_pr_create, cwd or "", title, body, base, head
+                        _gh_pr_create, cwd or "", title, body, base, head, owner_repo
                     )
                 case "list":
-                    result = await _run_sync(_gh_pr_list, cwd or "", state, limit)
+                    result = await _run_sync(
+                        _gh_pr_list, cwd or "", state, limit, owner_repo
+                    )
                 case "merge":
                     result = await _run_sync(
-                        _gh_pr_merge, cwd or "", number or None, strategy
+                        _gh_pr_merge, cwd or "", number or None, strategy, owner_repo
                     )
                 case "view":
                     result = await _run_sync(
-                        _gh_pr_view, cwd or "", number or None
+                        _gh_pr_view, cwd or "", number or None, owner_repo
                     )
                 case "review":
                     if not number:
                         return _err("gh_pr review 需要 number 参数")
                     result = await _run_sync(
-                        _gh_pr_review, cwd or "", number, body, review_event
+                        _gh_pr_review, cwd or "", number, body, review_event, owner_repo
                     )
                 case _:
                     return _err(f"未知操作: {action}")
@@ -1383,6 +1390,10 @@ class GhIssueTool(FunctionTool):
                     "enum": ["create", "list", "close"],
                 },
                 "cwd": {"type": "string", "description": "仓库路径，默认当前工作目录"},
+                "owner_repo": {
+                    "type": "string",
+                    "description": "仓库，格式 owner/repo（可选）。传了就按 --repo 直接指定，不需要本地 git 仓库",
+                },
                 "title": {
                     "type": "string",
                     "description": "Issue 标题（create 时必填）",
@@ -1411,6 +1422,7 @@ class GhIssueTool(FunctionTool):
         context: ContextWrapper[AstrAgentContext],
         action: str,
         cwd: str = "",
+        owner_repo: str = "",
         title: str = "",
         body: str = "",
         number: int = 0,
@@ -1427,16 +1439,18 @@ class GhIssueTool(FunctionTool):
                         return _err("gh_issue create 需要 title 参数")
                     lbls = [l.strip() for l in labels.split(",")] if labels else None
                     result = await _run_sync(
-                        _gh_issue_create, cwd or "", title, body, lbls
+                        _gh_issue_create, cwd or "", title, body, lbls, owner_repo
                     )
                 case "list":
                     result = await _run_sync(
-                        _gh_issue_list, cwd or "", state, limit, labels
+                        _gh_issue_list, cwd or "", state, limit, labels, owner_repo
                     )
                 case "close":
                     if not number:
                         return _err("gh_issue close 需要 number 参数")
-                    result = await _run_sync(_gh_issue_close, cwd or "", number)
+                    result = await _run_sync(
+                        _gh_issue_close, cwd or "", number, owner_repo
+                    )
                 case _:
                     return _err(f"未知操作: {action}")
             return _unwrap(result)
@@ -1464,6 +1478,10 @@ class GhReleaseTool(FunctionTool):
                     "enum": ["create", "list"],
                 },
                 "cwd": {"type": "string", "description": "仓库路径，默认当前工作目录"},
+                "owner_repo": {
+                    "type": "string",
+                    "description": "仓库，格式 owner/repo（可选）。传了就按 --repo 直接指定，不需要本地 git 仓库",
+                },
                 "tag": {
                     "type": "string",
                     "description": "Release 标签，如 v1.2.3（create 时必填）",
@@ -1487,6 +1505,7 @@ class GhReleaseTool(FunctionTool):
         context: ContextWrapper[AstrAgentContext],
         action: str,
         cwd: str = "",
+        owner_repo: str = "",
         tag: str = "",
         notes: str = "",
         generate_notes: bool = True,
@@ -1500,10 +1519,17 @@ class GhReleaseTool(FunctionTool):
                     if not tag:
                         return _err("gh_release create 需要 tag 参数")
                     result = await _run_sync(
-                        _gh_release_create, cwd or "", tag, notes, generate_notes
+                        _gh_release_create,
+                        cwd or "",
+                        tag,
+                        notes,
+                        generate_notes,
+                        owner_repo,
                     )
                 case "list":
-                    result = await _run_sync(_gh_release_list, cwd or "", limit)
+                    result = await _run_sync(
+                        _gh_release_list, cwd or "", limit, owner_repo
+                    )
                 case _:
                     return _err(f"未知操作: {action}")
             return _unwrap(result)
@@ -1569,15 +1595,15 @@ class GhRepoTool(FunctionTool):
                 case "view":
                     result = await _run_sync(_gh_repo_view, cwd or "", owner_repo)
                 case "runs":
-                    result = await _run_sync(_gh_run_list, cwd or "", limit)
+                    result = await _run_sync(_gh_run_list, cwd or "", limit, owner_repo)
                 case "run_view":
                     if not run_id:
                         return _err("gh_repo run_view 需要 run_id 参数（从 action=runs 结果获取）")
-                    result = await _run_sync(_gh_run_view, run_id, cwd or ".")
+                    result = await _run_sync(_gh_run_view, run_id, cwd or ".", owner_repo)
                 case "run_logs":
                     if not run_id:
                         return _err("gh_repo run_logs 需要 run_id 参数（从 action=runs 结果获取）")
-                    result = await _run_sync(_gh_run_logs, run_id, cwd or ".")
+                    result = await _run_sync(_gh_run_logs, run_id, cwd or ".", 8000, owner_repo)
                 case "auth":
                     result = await _run_sync(_gh_auth_status)
                 case _:

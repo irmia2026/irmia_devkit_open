@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **gh 工具链 owner_repo 贯通 + 失败诊断修正**: `gh_pr` / `gh_issue` / `gh_release` 新增 `owner_repo` 参数（此前仅 `gh_repo` 有、且只作用于 `view`），`_run_gh` 统一追加 `--repo`，非 git 目录下也能直接操作指定仓库——registry 层原本只透传 `cwd`，`owner_repo` 被 `**kwargs` 静默吞掉且无任何提示。同时修正 `_run_gh` 的失败诊断：原逻辑为「自定义 gh 路径 + 命令失败」一律报「gh CLI 未在 <path> 找到」，把「命令执行失败」（非 git 目录、认证失效、参数错）与「可执行文件找不到」混为一谈，排查方向被误导（实测 gh 正常安装且已认证，仅因 cwd 不是 git 仓库就报「找不到 gh」）；现按真实 stderr 分类——未安装/不在 PATH → 路径提示；`not a git repository` / `no git remotes` → 仓库定位提示（给出 `cwd` 与 `owner_repo` 两条出路）；认证类 → `gh auth status` 提示；其余 → 透传原始 stderr 与退出码，不编故事。覆盖 `pr create/list/view/merge/review`、`issue create/list/close`、`release create/list`、`run list/view/logs`；新增 6 例测试（`--repo` 注入、三类诊断分类、`pr_view` 透传）。
 - **syntax_check 多语言扩展**: 新增 Rust（rustfmt --emit stdout 纯解析，规避 --check 把格式差异误判为失败）/ Java（javac -XDshould-stop.at=PARSE 只解析不语义分析，规避临时文件名与 public 类名不匹配等误报，不识该选项的老 JDK 自动回退常规编译）/ C/C++（gcc/clang -fsyntax-only，MSVC cl /Zs 兑底；实测 MinGW gcc 不认 `--` 终止符，统一不加）/ PHP（php -l）/ PowerShell（Parser.ParseFile 纯解析不执行，pwsh 7 优先回退 powershell 5）/ Shell（bash -n stdin 模式规避 WSL 不认 Windows 路径；WSL 启动器在 PATH 但后端损坏的场景可用性自检+按路径缓存，不误报语法错误）/ JSON（标准库，错误带行列号）/ TOML（tomllib，Python 3.10 回退 tomli）/ YAML（PyYAML compose 纯语法层）；路由改为扩展名→检查器调度表；工具链缺失统一 skipped=true 降级不阻塞编辑链路。
 
 ## v2.6.5 — http_get 健壮性：编码嗅探 / 指数退避重试 / 二进制分流 / final_url

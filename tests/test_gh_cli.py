@@ -6,7 +6,7 @@ from tools import gh_cli
 def test_pr_review_uses_body_file_for_multiline_body(monkeypatch):
     captured = {}
 
-    def fake_run_gh(args, cwd=None, timeout=20):
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
         captured["args"] = args
         captured["cwd"] = cwd
         captured["timeout"] = timeout
@@ -36,7 +36,7 @@ def test_pr_review_rejects_unknown_event():
 def test_run_view_flattens_json(monkeypatch):
     captured = {}
 
-    def fake_run_gh(args, cwd=None, timeout=20):
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
         captured["args"] = args
         return {
             "ok": True,
@@ -57,7 +57,7 @@ def test_run_view_flattens_json(monkeypatch):
 
 
 def test_run_view_error_passthrough(monkeypatch):
-    def fake_run_gh(args, cwd=None, timeout=20):
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
         return {"ok": False, "error": "gh 未安装或不在 PATH 中"}
 
     monkeypatch.setattr(gh_cli, "_run_gh", fake_run_gh)
@@ -70,7 +70,7 @@ def test_run_view_error_passthrough(monkeypatch):
 def test_run_logs_truncates_to_tail(monkeypatch):
     logs = "".join(f"log line {i}\n" for i in range(1000))
 
-    def fake_run_gh(args, cwd=None, timeout=20):
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
         return {"ok": True, "stdout": logs, "stderr": ""}
 
     monkeypatch.setattr(gh_cli, "_run_gh", fake_run_gh)
@@ -85,7 +85,7 @@ def test_run_logs_truncates_to_tail(monkeypatch):
 
 
 def test_run_logs_short_output_not_truncated(monkeypatch):
-    def fake_run_gh(args, cwd=None, timeout=20):
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
         return {"ok": True, "stdout": "short log", "stderr": ""}
 
     monkeypatch.setattr(gh_cli, "_run_gh", fake_run_gh)
@@ -97,7 +97,7 @@ def test_run_logs_short_output_not_truncated(monkeypatch):
 
 
 def test_run_logs_error_passthrough(monkeypatch):
-    def fake_run_gh(args, cwd=None, timeout=20):
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
         return {"ok": False, "error": "no log found", "stderr": "no log"}
 
     monkeypatch.setattr(gh_cli, "_run_gh", fake_run_gh)
@@ -105,3 +105,121 @@ def test_run_logs_error_passthrough(monkeypatch):
 
     assert result["ok"] is False
     assert "error" in result or "stderr" in result
+
+
+def test_run_gh_appends_repo_flag_when_owner_repo_given(monkeypatch):
+    """传 owner_repo 时走 --repo，不依赖本地 git 仓库（cwd 不需要是仓库）。"""
+    captured = {}
+
+    def fake_run_cmd(args, cwd="", timeout=15, env=None):
+        captured["args"] = args
+        captured["cwd"] = cwd
+        return {"ok": True, "stdout": "[]", "stderr": "", "code": 0}
+
+    monkeypatch.setattr(gh_cli, "_run_cmd", fake_run_cmd)
+    monkeypatch.setattr(gh_cli, "_find_gh", lambda: "D:\\Irmia\\tools\\gh.exe")
+
+    gh_cli._run_gh(["pr", "view", "1"], owner_repo="irmia2026/I.R.M.I.A")
+
+    assert captured["args"][-2:] == ["--repo", "irmia2026/I.R.M.I.A"]
+    assert captured["cwd"] == "."
+
+
+def test_run_gh_without_owner_repo_keeps_cwd_behavior(monkeypatch):
+    captured = {}
+
+    def fake_run_cmd(args, cwd="", timeout=15, env=None):
+        captured["args"] = args
+        captured["cwd"] = cwd
+        return {"ok": True, "stdout": "[]", "stderr": "", "code": 0}
+
+    monkeypatch.setattr(gh_cli, "_run_cmd", fake_run_cmd)
+    monkeypatch.setattr(gh_cli, "_find_gh", lambda: "gh")
+
+    gh_cli._run_gh(["pr", "view", "1"], cwd="myrepo")
+
+    assert "--repo" not in captured["args"]
+    assert captured["cwd"] == "myrepo"
+
+
+def test_not_a_git_repository_is_diagnosed_as_repo_problem(monkeypatch):
+    """非 git 目录失败，不能误报成「gh CLI 没找到」。"""
+
+    def fake_run_cmd(args, cwd="", timeout=15, env=None):
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": "fatal: not a git repository (or any of the parent directories): .git",
+            "code": 1,
+        }
+
+    monkeypatch.setattr(gh_cli, "_run_cmd", fake_run_cmd)
+    monkeypatch.setattr(gh_cli, "_find_gh", lambda: "D:\\Irmia\\tools\\gh.exe")
+
+    result = gh_cli.pr_view("", 1)
+
+    assert result["ok"] is False
+    assert "git 仓库" in result["proposal"]
+    assert "owner_repo" in result["proposal"]
+    assert "未在" not in result["proposal"]
+
+
+def test_no_git_remotes_is_diagnosed_as_repo_problem(monkeypatch):
+    """gh 在非仓库目录还可能报 no git remotes found，同样归类为仓库问题。"""
+
+    def fake_run_cmd(args, cwd="", timeout=15, env=None):
+        return {"ok": False, "stdout": "", "stderr": "no git remotes found", "code": 1}
+
+    monkeypatch.setattr(gh_cli, "_run_cmd", fake_run_cmd)
+    monkeypatch.setattr(gh_cli, "_find_gh", lambda: "D:\\Irmia\\tools\\gh.exe")
+
+    result = gh_cli.pr_view("", 1)
+
+    assert result["ok"] is False
+    assert "git 仓库" in result["proposal"]
+    assert "未在" not in result["proposal"]
+
+
+def test_unrecognized_failure_keeps_raw_stderr(monkeypatch):
+    """分类不了的错误直接上原始 stderr，不编故事。"""
+
+    def fake_run_cmd(args, cwd="", timeout=15, env=None):
+        return {"ok": False, "stdout": "", "stderr": "something weird happened", "code": 3}
+
+    monkeypatch.setattr(gh_cli, "_run_cmd", fake_run_cmd)
+    monkeypatch.setattr(gh_cli, "_find_gh", lambda: "gh")
+
+    result = gh_cli.pr_view("", 1)
+
+    assert "something weird happened" in result["proposal"]
+    assert "未在" not in result["proposal"]
+
+
+def test_missing_binary_is_diagnosed_as_path_problem(monkeypatch):
+    def fake_run_cmd(args, cwd="", timeout=15, env=None):
+        return {"ok": False, "error": "gh 未安装或不在 PATH 中"}
+
+    monkeypatch.setattr(gh_cli, "_run_cmd", fake_run_cmd)
+    monkeypatch.setattr(gh_cli, "_find_gh", lambda: "D:\\Irmia\\tools\\gh.exe")
+
+    result = gh_cli.pr_view("", 1)
+
+    assert result["ok"] is False
+    assert "未在" in result["proposal"]
+    assert "gh_path" in result["proposal"]
+
+
+def test_pr_view_forwards_owner_repo(monkeypatch):
+    captured = {}
+
+    def fake_run_gh(args, cwd=None, timeout=20, owner_repo=""):
+        captured["owner_repo"] = owner_repo
+        captured["args"] = args
+        return {"ok": True, "stdout": "{}", "stderr": ""}
+
+    monkeypatch.setattr(gh_cli, "_run_gh", fake_run_gh)
+
+    gh_cli.pr_view("", 1, owner_repo="irmia2026/I.R.M.I.A")
+
+    assert captured["owner_repo"] == "irmia2026/I.R.M.I.A"
+    assert captured["args"][:3] == ["pr", "view", "1"]
