@@ -39,13 +39,43 @@ class DevkitWebController:
             ("/tool_groups", self.page_tool_groups, ["GET"], "Tool group definitions"),
             ("/groups", self.page_list_groups, ["GET"], "QQ group list"),
             ("/contacts", self.page_list_contacts, ["GET"], "QQ private contact list"),
-            ("/group_config", self.page_get_group_config, ["GET"], "Get one group config"),
-            ("/group_config/save", self.page_save_group_config, ["POST"], "Save one group config"),
-            ("/global_admin_ids", self.page_global_admin_ids, ["GET"], "Global admin IDs"),
+            (
+                "/group_config",
+                self.page_get_group_config,
+                ["GET"],
+                "Get one group config",
+            ),
+            (
+                "/group_config/save",
+                self.page_save_group_config,
+                ["POST"],
+                "Save one group config",
+            ),
+            (
+                "/global_admin_ids",
+                self.page_global_admin_ids,
+                ["GET"],
+                "Global admin IDs",
+            ),
             ("/ui_preferences", self.page_ui_preferences, ["GET"], "UI preferences"),
-            ("/ui_preferences/save", self.page_save_ui_preferences, ["POST"], "Save UI preferences"),
-            ("/path_options", self.page_path_options, ["GET"], "Optional external paths"),
-            ("/path_options/save", self.page_save_path_options, ["POST"], "Save optional external paths"),
+            (
+                "/ui_preferences/save",
+                self.page_save_ui_preferences,
+                ["POST"],
+                "Save UI preferences",
+            ),
+            (
+                "/path_options",
+                self.page_path_options,
+                ["GET"],
+                "Optional external paths",
+            ),
+            (
+                "/path_options/save",
+                self.page_save_path_options,
+                ["POST"],
+                "Save optional external paths",
+            ),
         ]
         for path, handler, methods, desc in routes:
             self.context.register_web_api(
@@ -63,13 +93,16 @@ class DevkitWebController:
     def _request():
         return cast(Any, quart_request_obj)
 
-    def _wrap_handler(self, handler: Callable[[], Awaitable]) -> Callable[[], Awaitable]:
+    def _wrap_handler(
+        self, handler: Callable[[], Awaitable]
+    ) -> Callable[[], Awaitable]:
         async def wrapped():
             try:
                 return await handler()
             except Exception as exc:
                 logger.exception("[DevkitWeb] request failed")
                 return self._jsonify({"ok": False, "error": str(exc)}), 500
+
         wrapped.__name__ = handler.__name__
         return wrapped
 
@@ -82,7 +115,9 @@ class DevkitWebController:
     def _ui_preferences_file(self) -> str:
         group_config_file = self._group_config_file()
         if group_config_file:
-            return os.path.join(os.path.dirname(group_config_file), "ui_preferences.json")
+            return os.path.join(
+                os.path.dirname(group_config_file), "ui_preferences.json"
+            )
         return ""
 
     @staticmethod
@@ -154,7 +189,10 @@ class DevkitWebController:
 
     async def page_tool_groups(self):
         from .tools._registry import TOOL_GROUPS
-        return self._jsonify({"ok": True, "groups": {k: v for k, v in TOOL_GROUPS.items()}})
+
+        return self._jsonify(
+            {"ok": True, "groups": {k: v for k, v in TOOL_GROUPS.items()}}
+        )
 
     async def page_list_groups(self):
         configs = self._read_group_configs()
@@ -197,7 +235,9 @@ class DevkitWebController:
             "group_id": group_id,
             "extra_admin_ids": str(data.get("extra_admin_ids", "")).strip(),
             "tool_groups": {str(k): bool(v) for k, v in raw_tool_groups.items()},
-            "disabled_tools": [str(item).strip() for item in raw_disabled_tools if str(item).strip()],
+            "disabled_tools": [
+                str(item).strip() for item in raw_disabled_tools if str(item).strip()
+            ],
             "updated_at": int(time.time()),
         }
         configs = self._read_group_configs()
@@ -209,7 +249,9 @@ class DevkitWebController:
     async def page_path_options(self):
         keys = ("es_path", "gh_path", "backup_dir")
         data = self._read_main_config()
-        return self._jsonify({"ok": True, "paths": {k: str(data.get(k, "") or "") for k in keys}})
+        return self._jsonify(
+            {"ok": True, "paths": {k: str(data.get(k, "") or "") for k in keys}}
+        )
 
     async def page_save_path_options(self):
         payload = await self._request().get_json(force=True, silent=True) or {}
@@ -235,18 +277,13 @@ class DevkitWebController:
     async def page_save_ui_preferences(self):
         data = await self._request().get_json(force=True, silent=True) or {}
         palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
-        if palette_mode not in {"luxury", "bluewhite", "vivid", "void"}:
+        if palette_mode not in {"luxury", "bluewhite", "vivid"}:
             palette_mode = "luxury"
-        appearance_mode = str(data.get("appearance_mode", "auto")).strip().lower()
-        if appearance_mode not in {"auto", "light", "dark"}:
-            appearance_mode = "auto"
         prefs = self._read_ui_preferences()
-        previous_appearance_mode = str(data.get("previous_appearance_mode", prefs.get("previous_appearance_mode", "auto"))).strip().lower()
-        if previous_appearance_mode not in {"auto", "light", "dark"}:
-            previous_appearance_mode = "auto"
         prefs["palette_mode"] = palette_mode
-        prefs["appearance_mode"] = appearance_mode
-        prefs["previous_appearance_mode"] = previous_appearance_mode
+        if isinstance(data.get("ui_sound_enabled"), bool):
+            prefs["ui_sound_enabled"] = data["ui_sound_enabled"]
+        prefs["appearance_mode"] = "dark"
         prefs["updated_at"] = int(time.time())
         self._write_ui_preferences(prefs)
         return self._jsonify({"ok": True, "preferences": prefs})
@@ -284,9 +321,25 @@ class DevkitWebController:
                     if not gid or gid in groups:
                         continue
                     name = str(item.get("group_name") or item.get("name") or f"群{gid}")
-                    avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("group_avatar") or "")
-                    member_count = item.get("member_count") or item.get("member_num") or item.get("member_total") or item.get("max_member_count") or ""
-                    groups[gid] = {"id": gid, "name": name, "avatar": avatar, "member_count": str(member_count or "")}
+                    avatar = str(
+                        item.get("avatar")
+                        or item.get("avatar_url")
+                        or item.get("group_avatar")
+                        or ""
+                    )
+                    member_count = (
+                        item.get("member_count")
+                        or item.get("member_num")
+                        or item.get("member_total")
+                        or item.get("max_member_count")
+                        or ""
+                    )
+                    groups[gid] = {
+                        "id": gid,
+                        "name": name,
+                        "avatar": avatar,
+                        "member_count": str(member_count or ""),
+                    }
             except AttributeError as exc:
                 logger.debug("devkit: 当前平台不支持 get_group_list: %s", exc)
             except Exception as exc:
@@ -299,11 +352,21 @@ class DevkitWebController:
                 continue
             updated_at = int(cfg.get("updated_at", 0)) if isinstance(cfg, dict) else 0
             groups[gid]["updated_at"] = updated_at
-        return sorted(groups.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("id") or "")))
+        return sorted(
+            groups.values(),
+            key=lambda item: (
+                -int(item.get("updated_at", 0)),
+                str(item.get("name") or item.get("id") or ""),
+            ),
+        )
 
     @staticmethod
     def _qq_avatar_url(user_id: str) -> str:
-        return f"https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=100" if user_id.isdigit() else ""
+        return (
+            f"https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=100"
+            if user_id.isdigit()
+            else ""
+        )
 
     async def _get_all_private_contacts(self) -> list[dict[str, str]]:
         contacts: dict[str, dict[str, str]] = {}
@@ -323,13 +386,31 @@ class DevkitWebController:
                 for item in self._items_from_result(result):
                     if not isinstance(item, dict):
                         continue
-                    uid = self._normalize_group_id(item.get("user_id") or item.get("id") or item.get("uin") or "")
+                    uid = self._normalize_group_id(
+                        item.get("user_id") or item.get("id") or item.get("uin") or ""
+                    )
                     if not uid:
                         continue
                     cid = f"private:{uid}"
-                    name = str(item.get("nickname") or item.get("remark") or item.get("name") or f"用户{uid}")
-                    avatar = str(item.get("avatar") or item.get("avatar_url") or item.get("user_avatar") or self._qq_avatar_url(uid))
-                    contacts[cid] = {"id": cid, "name": name, "avatar": avatar, "user_id": uid, "kind": "private"}
+                    name = str(
+                        item.get("nickname")
+                        or item.get("remark")
+                        or item.get("name")
+                        or f"用户{uid}"
+                    )
+                    avatar = str(
+                        item.get("avatar")
+                        or item.get("avatar_url")
+                        or item.get("user_avatar")
+                        or self._qq_avatar_url(uid)
+                    )
+                    contacts[cid] = {
+                        "id": cid,
+                        "name": name,
+                        "avatar": avatar,
+                        "user_id": uid,
+                        "kind": "private",
+                    }
             except AttributeError as exc:
                 logger.debug("devkit: 当前平台不支持 get_friend_list: %s", exc)
             except Exception as exc:
@@ -339,15 +420,31 @@ class DevkitWebController:
             if not cid.startswith("private:") or not isinstance(cfg, dict):
                 continue
             uid = cid.split(":", 1)[1]
-            contacts.setdefault(cid, {"id": cid, "name": f"用户{uid}", "avatar": self._qq_avatar_url(uid), "user_id": uid, "kind": "private"})
+            contacts.setdefault(
+                cid,
+                {
+                    "id": cid,
+                    "name": f"用户{uid}",
+                    "avatar": self._qq_avatar_url(uid),
+                    "user_id": uid,
+                    "kind": "private",
+                },
+            )
             contacts[cid]["updated_at"] = int(cfg.get("updated_at", 0))
-        return sorted(contacts.values(), key=lambda item: (-int(item.get("updated_at", 0)), str(item.get("name") or item.get("user_id") or "")))
+        return sorted(
+            contacts.values(),
+            key=lambda item: (
+                -int(item.get("updated_at", 0)),
+                str(item.get("name") or item.get("user_id") or ""),
+            ),
+        )
 
     # ── 群配置 ──
 
     @staticmethod
     def _default_group_config(group_id: str) -> dict[str, Any]:
         from .tools._registry import TOOL_GROUPS
+
         return {
             "group_id": group_id,
             "extra_admin_ids": "",
@@ -391,23 +488,31 @@ class DevkitWebController:
 
     def _read_ui_preferences(self) -> dict[str, Any]:
         prefs_file = self._ui_preferences_file()
+        default_prefs = {
+            "palette_mode": "luxury",
+            "appearance_mode": "dark",
+            "ui_sound_enabled": True,
+        }
         if not prefs_file or not os.path.exists(prefs_file):
-            return {"palette_mode": "luxury"}
+            return default_prefs.copy()
         try:
             with open(prefs_file, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
-                return {"palette_mode": "luxury"}
+                return default_prefs.copy()
             palette_mode = str(data.get("palette_mode", "luxury")).strip().lower()
-            data["palette_mode"] = palette_mode if palette_mode in {"luxury", "bluewhite", "vivid", "void"} else "luxury"
-            appearance_mode = str(data.get("appearance_mode", "auto")).strip().lower()
-            data["appearance_mode"] = appearance_mode if appearance_mode in {"auto", "light", "dark"} else "auto"
-            previous_appearance_mode = str(data.get("previous_appearance_mode", data["appearance_mode"])).strip().lower()
-            data["previous_appearance_mode"] = previous_appearance_mode if previous_appearance_mode in {"auto", "light", "dark"} else data["appearance_mode"]
+            data["palette_mode"] = (
+                palette_mode
+                if palette_mode in {"luxury", "bluewhite", "vivid"}
+                else "luxury"
+            )
+            data["appearance_mode"] = "dark"
+            if not isinstance(data.get("ui_sound_enabled"), bool):
+                data["ui_sound_enabled"] = True
             return data
         except Exception:
             logger.warning("ui_preferences.json 读取失败，已使用默认偏好")
-            return {"palette_mode": "luxury"}
+            return default_prefs.copy()
 
     def _write_ui_preferences(self, prefs: dict[str, Any]) -> None:
         prefs_file = self._ui_preferences_file()

@@ -3,14 +3,10 @@ import { createApi } from "./api.js";
 let bridge = window.AstrBotPluginPage;
 
 const PALETTE_KEY = "irmia_devkit_palette_mode";
-const APPEARANCE_KEY = "irmia_devkit_appearance_mode";
 const PALETTE_MODES = ["luxury", "bluewhite", "vivid"];
-const APPEARANCE_MODES = ["auto", "dark", "light"];
-const PALETTE_LABELS = { luxury: "石墨", bluewhite: "晴空", vivid: "珊瑚" };
-const APPEARANCE_LABELS = { auto: "自动", dark: "深色", light: "浅色" };
+const PALETTE_LABELS = { luxury: "流光溢彩", bluewhite: "晴空", vivid: "珊瑚" };
 
 let paletteMode = "luxury";
-let appearanceMode = "auto";
 let uiSoundEnabled = true;
 let audioUnlocked = false;
 let audioContext = null;
@@ -26,6 +22,7 @@ let pathOptions = { es_path: "", gh_path: "", backup_dir: "" };
 let searchTerm = "";
 let activeGroupFilter = "";
 let chartMode = "live";
+let panelRefreshTimer = 0;
 
 const collapsedMenus = { groups: true, contacts: true };
 const DEFAULT_GROUP = {
@@ -186,10 +183,6 @@ function savePaletteLocally(mode) {
   try { localStorage.setItem(PALETTE_KEY, mode); } catch { /* ignore */ }
 }
 
-function saveAppearanceLocally(mode) {
-  try { localStorage.setItem(APPEARANCE_KEY, mode); } catch { /* ignore */ }
-}
-
 function getStoredPaletteMode() {
   let saved = paletteMode || "luxury";
   try { saved = localStorage.getItem(PALETTE_KEY) || saved; } catch { /* ignore */ }
@@ -197,36 +190,25 @@ function getStoredPaletteMode() {
   return paletteMode;
 }
 
-function getStoredAppearanceMode() {
-  let saved = appearanceMode || "auto";
-  try { saved = localStorage.getItem(APPEARANCE_KEY) || saved; } catch { /* ignore */ }
-  appearanceMode = APPEARANCE_MODES.includes(saved) ? saved : "auto";
-  return appearanceMode;
-}
-
-function resolveAppearance(mode) {
-  if (mode === "light" || mode === "dark") return mode;
-  return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
-}
-
 function setStartupLoading(title = "读取配置", detail = "正在加载工具与权限配置") {
-  const loader = document.getElementById("startupLoader");
   const titleEl = document.getElementById("startupLoaderTitle");
   const detailEl = document.getElementById("startupLoaderDetail");
   if (titleEl) titleEl.textContent = title;
   if (detailEl) detailEl.textContent = detail;
-  loader?.classList.remove("is-hidden");
 }
 
 function hideStartupLoading() {
-  document.getElementById("startupLoader")?.classList.add("is-hidden");
+  const loader = document.getElementById("startupLoader");
+  if (!loader || loader.classList.contains("is-leaving")) return;
+  loader.classList.add("is-leaving");
+  loader.setAttribute("aria-hidden", "true");
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  window.setTimeout(() => { loader.hidden = true; }, reducedMotion ? 120 : 640);
 }
 
 function refreshAudioControls() {
   const soundButton = document.getElementById("soundFeedbackBtn");
   const soundLabel = document.getElementById("soundFeedbackLabel");
-  soundButton?.classList.toggle("media-active", uiSoundEnabled);
-  soundButton?.classList.toggle("sound-muted", !uiSoundEnabled);
   if (soundLabel) soundLabel.textContent = uiSoundEnabled ? "开" : "关";
   if (soundButton) {
     soundButton.title = uiSoundEnabled ? "音效：开" : "音效：关";
@@ -289,7 +271,6 @@ function buttonSoundKind(button) {
   if (id === "enableAllToolsBtn") return "switch-on";
   if (id === "disableAllToolsBtn") return "switch-off";
   if (id === "paletteToggleBtn") return "switch";
-  if (id === "appearanceToggleBtn") return "switch";
   if (id === "soundFeedbackBtn") return "switch";
   return button?.classList?.contains("btn-primary") ? "confirm" : "tap";
 }
@@ -299,25 +280,16 @@ function unlockAudioFeedback() {
   ensureAudioContext();
 }
 
-function refreshThemeControls() {
+function refreshPaletteControls() {
   const paletteLabel = document.getElementById("paletteModeLabel");
-  const appearanceLabel = document.getElementById("appearanceModeLabel");
-  if (paletteLabel) paletteLabel.textContent = PALETTE_LABELS[paletteMode] || "石墨";
-  if (appearanceLabel) appearanceLabel.textContent = APPEARANCE_LABELS[appearanceMode] || "自动";
+  if (paletteLabel) paletteLabel.textContent = PALETTE_LABELS[paletteMode] || "流光溢彩";
   refreshAudioControls();
 }
 
 function applyPalette(mode = getStoredPaletteMode()) {
   paletteMode = PALETTE_MODES.includes(mode) ? mode : "luxury";
   document.documentElement.dataset.palette = paletteMode;
-  refreshThemeControls();
-}
-
-function applyAppearance(mode = getStoredAppearanceMode()) {
-  appearanceMode = APPEARANCE_MODES.includes(mode) ? mode : "auto";
-  document.documentElement.dataset.appearance = appearanceMode;
-  document.documentElement.dataset.theme = resolveAppearance(appearanceMode);
-  refreshThemeControls();
+  refreshPaletteControls();
 }
 
 async function cyclePaletteMode() {
@@ -331,37 +303,21 @@ async function cyclePaletteMode() {
   showToast(`配色已切换为 ${PALETTE_LABELS[next]}`);
 }
 
-async function cycleAppearanceMode() {
-  const current = appearanceMode || getStoredAppearanceMode();
-  const currentIndex = APPEARANCE_MODES.includes(current) ? APPEARANCE_MODES.indexOf(current) : 0;
-  const next = APPEARANCE_MODES[(currentIndex + 1) % APPEARANCE_MODES.length];
-  appearanceMode = next;
-  saveAppearanceLocally(next);
-  applyAppearance(next);
-  await saveUiPreferences();
-  showToast(`明暗模式已切换为 ${APPEARANCE_LABELS[next] || next}`);
-}
-
 async function loadUiPreferences() {
   try {
     const data = await api.safeGet("ui_preferences");
     const prefs = data.preferences || {};
     const palette = prefs.palette_mode;
-    const appearance = prefs.appearance_mode;
     if (PALETTE_MODES.includes(palette)) {
       paletteMode = palette;
       savePaletteLocally(palette);
-    }
-    if (APPEARANCE_MODES.includes(appearance)) {
-      appearanceMode = appearance;
-      saveAppearanceLocally(appearance);
     }
     uiSoundEnabled = prefs.ui_sound_enabled !== false;
   } catch (e) {
     console.warn("loadUiPreferences", e);
   }
+  document.documentElement.dataset.theme = "dark";
   applyPalette(paletteMode);
-  applyAppearance(appearanceMode);
   refreshAudioControls();
 }
 
@@ -370,7 +326,7 @@ async function saveUiPreferences() {
   try {
     await api.safePost("ui_preferences/save", {
       palette_mode: paletteMode,
-      appearance_mode: appearanceMode,
+      appearance_mode: "dark",
       ui_sound_enabled: uiSoundEnabled,
     });
   } catch (e) {
@@ -395,14 +351,10 @@ async function toggleUiSoundFeedback() {
 
 async function init() {
   setStartupLoading("读取配置", "正在加载工具与权限配置");
+  document.documentElement.dataset.theme = "dark";
   applyPalette();
-  applyAppearance();
-  window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
-    if (appearanceMode === "auto") applyAppearance("auto");
-  });
 
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
-  document.getElementById("appearanceToggleBtn")?.addEventListener("click", cycleAppearanceMode);
   document.getElementById("soundFeedbackBtn")?.addEventListener("click", toggleUiSoundFeedback);
   document.addEventListener("pointerdown", unlockAudioFeedback, { once: true, capture: true });
   document.addEventListener("keydown", unlockAudioFeedback, { once: true, capture: true });
@@ -435,15 +387,14 @@ async function init() {
       }
       document.querySelectorAll(".nav-jump").forEach(item => item.classList.toggle("active", item === button));
       const target = document.getElementById(`section-${button.dataset.jump}`);
-      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      target?.scrollIntoView({ behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "instant" : "smooth", block: "start" });
     });
   });
 
-  await loadUiPreferences();
-  await loadToolGroups();
-  await loadGlobalAdmins();
-  await loadPathOptions();
-  await loadContacts();
+  await Promise.all([loadUiPreferences(), loadToolGroups(), loadGlobalAdmins(), loadPathOptions(), loadContacts()]);
+  renderConfigPanel();
+  const logo = document.querySelector(".startup-logo");
+  if (logo?.decode) await logo.decode().catch(() => {});
   hideStartupLoading();
 }
 
@@ -451,8 +402,6 @@ async function loadToolGroups() {
   try {
     const data = await api.safeGet("tool_groups");
     if (data.ok) toolGroupsDef = data.groups || {};
-    const label = document.getElementById("toolCountLabel");
-    if (label) label.textContent = String(allToolItems().length);
   } catch (e) {
     console.error("loadToolGroups", e);
   }
@@ -486,8 +435,9 @@ function renderPathOptionsPanel() {
       <div class="card-title-row">
         <div>
           <h3>外部路径</h3>
+          <p>留空时使用自动检测和默认目录。</p>
         </div>
-        <button class="btn btn-secondary compact" id="savePathOptionsBtn" type="button">保存路径</button>
+        <button class="btn btn-primary compact" id="savePathOptionsBtn" type="button">保存路径</button>
       </div>
       <div class="path-grid">
         <label class="field">
@@ -498,16 +448,11 @@ function renderPathOptionsPanel() {
           <span>GitHub CLI</span>
           <input class="input-field path-input" data-path-key="gh_path" value="${pathValue("gh_path")}" placeholder="留空自动检测 gh.exe">
         </label>
+        <label class="field wide">
+          <span>备份目录</span>
+          <input class="input-field path-input" data-path-key="backup_dir" value="${pathValue("backup_dir")}" placeholder="safe_edit 默认备份目录">
+        </label>
       </div>
-    </section>
-    <section class="dashboard-card backup-path-card" aria-label="备份目录">
-      <div class="card-title-row">
-        <h3>备份目录</h3>
-      </div>
-      <label class="field">
-        <span>safe_edit 备份位置</span>
-        <input class="input-field path-input" data-path-key="backup_dir" value="${pathValue("backup_dir")}" placeholder="留空使用默认备份目录">
-      </label>
     </section>`;
 }
 
@@ -549,11 +494,12 @@ async function loadContacts() {
 }
 
 function groupAvatarHtml(item) {
+  if (item.isDefault) return "";
   const avatar = String(item.avatar || "").trim();
   if (/^https?:\/\//i.test(avatar) || /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(avatar)) {
     return `<img class="group-avatar" src="${escapeHtml(avatar)}" alt="" referrerpolicy="no-referrer">`;
   }
-  const text = item.isDefault ? "全" : item.kind === "private" ? "私" : "群";
+  const text = item.kind === "private" ? "私" : "群";
   return `<div class="group-avatar-placeholder">${text}</div>`;
 }
 
@@ -569,13 +515,13 @@ function matchesSearch(item) {
 
 function renderContactSection(key, title, items) {
   const visibleItems = items.filter(matchesSearch);
-  const collapsed = collapsedMenus[key];
+  const collapsed = collapsedMenus[key] && !searchTerm;
   const body = collapsed
     ? ""
     : (visibleItems.length ? visibleItems.map(renderContactItem).join("") : `<div class="group-empty">暂无匹配的${escapeHtml(title)}</div>`);
   return `
     <section class="contact-section ${collapsed ? "collapsed" : ""}">
-      <button class="contact-section-head" type="button" data-menu="${key}">
+      <button class="contact-section-head" type="button" data-menu="${key}" aria-expanded="${!collapsed}">
         <span>${escapeHtml(title)}</span><b>${visibleItems.length}</b>
       </button>
       <div class="contact-section-body">${body}</div>
@@ -585,13 +531,13 @@ function renderContactSection(key, title, items) {
 function renderContactItem(item) {
   const isActive = item.id === selectedGroupId;
   const chip = item.isDefault ? "默认" : item.kind === "private" ? "私聊" : "群聊";
-  const detail = item.isDefault ? "未单独配置时使用" : escapeHtml(item.user_id || item.id);
+  const detail = item.isDefault ? "" : escapeHtml(item.user_id || item.id);
   return `
-    <button class="group-item ${isActive ? "active" : ""}" type="button" data-id="${escapeHtml(item.id)}">
+    <button class="group-item ${isActive ? "active" : ""}" type="button" data-id="${escapeHtml(item.id)}" aria-pressed="${isActive}">
       ${groupAvatarHtml(item)}
       <span class="group-copy">
         <strong>${escapeHtml(item.name)}</strong>
-        <small>${detail}</small>
+        ${detail ? `<small>${detail}</small>` : ""}
       </span>
       <em>${chip}</em>
     </button>`;
@@ -600,15 +546,8 @@ function renderContactItem(item) {
 function renderGroupList() {
   const container = document.getElementById("groupList");
   if (!container) return;
-  const groupCount = document.getElementById("groupCountLabel");
-  const privateCount = document.getElementById("privateCountLabel");
-  if (groupCount) groupCount.textContent = String(groupsData.length);
-  if (privateCount) privateCount.textContent = String(contactsData.length);
-
-  const defaultVisible = matchesSearch(DEFAULT_GROUP) || !searchTerm;
-  const globalHtml = defaultVisible ? `<section class="global-contact-card">${renderContactItem(DEFAULT_GROUP)}</section>` : "";
   container.innerHTML =
-    globalHtml +
+    `<div class="global-contact-card">${renderContactItem(DEFAULT_GROUP)}</div>` +
     renderContactSection("groups", "群聊列表", groupsData) +
     renderContactSection("contacts", "私聊列表", contactsData);
 
@@ -628,6 +567,7 @@ async function selectGroup(groupId) {
   selectedGroupId = groupId;
   currentConfig = null;
   activeGroupFilter = "";
+  document.querySelectorAll(".nav-jump").forEach(button => button.classList.toggle("active", button.dataset.jump === "tools"));
   renderGroupList();
   renderConfigPanel();
   try {
@@ -635,7 +575,7 @@ async function selectGroup(groupId) {
     if (requestId !== groupRequestId) return;
     if (!data.ok) throw new Error("group_config failed");
     currentConfig = normalizeConfig({ ...data.config, group_id: groupId });
-    renderConfigPanel();
+    renderConfigPanel(true);
   } catch (e) {
     if (requestId !== groupRequestId) return;
     console.error("selectGroup", e);
@@ -660,12 +600,12 @@ function normalizeConfig(config) {
 
 function getEnabledToolCount() {
   const disabled = new Set(currentConfig?.disabled_tools || []);
-  return allToolItems().filter(tool => !disabled.has(tool.id)).length;
+  return allToolItems().filter(tool => currentConfig?.tool_groups?.[tool.groupName] !== false && !disabled.has(tool.id)).length;
 }
 
 function getGroupStats(groupName, tools) {
   const disabled = new Set(currentConfig?.disabled_tools || []);
-  const enabled = tools.filter(tool => !disabled.has(tool.id)).length;
+  const enabled = currentConfig?.tool_groups?.[groupName] === false ? 0 : tools.filter(tool => !disabled.has(tool.id)).length;
   const total = tools.length;
   return {
     enabled,
@@ -676,10 +616,6 @@ function getGroupStats(groupName, tools) {
   };
 }
 
-function formatDate() {
-  return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "2-digit", year: "numeric" }).format(new Date());
-}
-
 function currentTargetMeta() {
   const contact = contactById(selectedGroupId);
   const fallbackName = selectedGroupId.startsWith("private:")
@@ -688,28 +624,11 @@ function currentTargetMeta() {
   const name = contact?.name || fallbackName;
   const kind = contact?.isDefault ? "全局" : contact?.kind === "private" ? "私聊" : "群聊";
   const hint = selectedGroupId === "__default__"
-    ? "默认配置会影响所有未单独配置的群聊和私聊。"
+    ? ""
     : contact?.kind === "private"
       ? "这里只控制该私聊场景下 DevKit 工具的可用范围。"
       : "这里只控制该群聊场景下 DevKit 工具的可用范围。";
   return { name, kind, hint };
-}
-
-function renderMetricCards(allTools, enabledTools) {
-  const groupCount = Object.keys(toolGroupsDef).length;
-  const disabledTools = Math.max(allTools.length - enabledTools, 0);
-  const enabledGroups = Object.keys(currentConfig.tool_groups || {}).filter(key => currentConfig.tool_groups[key] !== false).length;
-  const metrics = [
-    ["工具总数", allTools.length, "total"],
-    ["可用工具", enabledTools, "on"],
-    ["关闭工具", disabledTools, "off"],
-    ["启用分组", `${enabledGroups}/${groupCount}`, "group"],
-  ];
-  return metrics.map(([label, value, tone]) => `
-    <article class="metric-card ${tone}">
-      <span>${label}</span>
-      <strong>${escapeHtml(value)}</strong>
-    </article>`).join("");
 }
 
 function renderTrendCard() {
@@ -768,7 +687,7 @@ function renderBreakdownCard() {
           <span>${stats.enabled}/${stats.total} 可用</span>
         </div>
         <label class="switch" title="工具组总开关">
-          <input class="group-toggle" type="checkbox" data-group="${escapeHtml(groupName)}" ${stats.groupEnabled ? "checked" : ""}>
+          <input class="group-toggle" type="checkbox" data-group="${escapeHtml(groupName)}" ${stats.groupEnabled ? "checked" : ""} aria-label="${escapeHtml(groupName)}工具组">
           <span class="switch-track"></span><span class="switch-thumb"></span>
         </label>
       </div>`;
@@ -777,7 +696,7 @@ function renderBreakdownCard() {
     <section class="dashboard-card breakdown-card" id="section-groups">
       <div class="card-title-row group-title-row">
         <div>
-          <h3>工具分组</h3>
+          <h4>工具分组</h4>
         </div>
         ${renderBulkActions()}
       </div>
@@ -791,6 +710,7 @@ function renderAdminCard(adminIdsStr) {
       <div class="card-title-row">
         <div>
           <h3>管理员权限</h3>
+          <p>为当前配置对象设置额外管理员。</p>
         </div>
       </div>
       <div class="admin-grid">
@@ -815,20 +735,18 @@ function renderBulkActions() {
 }
 
 function renderGroupFilters() {
-  return sortedGroupEntries().map(([groupName, tools]) => `
-    <button class="group-filter ${activeGroupFilter === groupName ? "active" : ""}" type="button" data-group="${escapeHtml(groupName)}">
-      ${escapeHtml(groupName)}<span>${tools.length}</span>
-    </button>`).join("");
+  return `<option value="">全部分组</option>` + sortedGroupEntries().map(([groupName, tools]) => `
+    <option value="${escapeHtml(groupName)}" ${activeGroupFilter === groupName ? "selected" : ""}>${escapeHtml(groupName)} (${tools.length})</option>`).join("");
 }
 
 function filteredToolRows() {
   const disabled = new Set(currentConfig.disabled_tools || []);
   return allToolItems().filter(tool => {
-    const groupOk = Boolean(activeGroupFilter) && tool.groupName === activeGroupFilter;
+    const groupOk = !activeGroupFilter || tool.groupName === activeGroupFilter;
     if (!groupOk) return false;
     if (!searchTerm) return true;
     return [tool.id, tool.name, tool.desc, tool.groupName].join(" ").toLowerCase().includes(searchTerm);
-  }).map(tool => ({ ...tool, enabled: !disabled.has(tool.id) }));
+  }).map(tool => ({ ...tool, enabled: currentConfig.tool_groups?.[tool.groupName] !== false && !disabled.has(tool.id) }));
 }
 
 function renderToolGroupCards() {
@@ -840,25 +758,37 @@ function renderToolGroupCards() {
     <tr class="${tool.enabled ? "" : "disabled-row"}">
       <td>
         <div class="tool-cell">
-          <div><strong>${escapeHtml(tool.name)}</strong>${tool.name !== tool.id ? `<small>${escapeHtml(tool.id)}</small>` : ""}</div>
+          <div><strong>${escapeHtml(tool.name)}</strong><small>${escapeHtml(tool.desc)}</small></div>
         </div>
       </td>
       <td>${escapeHtml(tool.groupName)}</td>
       <td>
         <label class="switch tool-toggle" title="${tool.enabled ? "关闭工具" : "开启工具"}">
-          <input class="tool-action" type="checkbox" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(tool.groupName)}" ${tool.enabled ? "checked" : ""} aria-label="${tool.enabled ? "关闭工具" : "开启工具"}">
+          <input class="tool-action" type="checkbox" data-tool="${escapeHtml(tool.id)}" data-group-name="${escapeHtml(tool.groupName)}" ${tool.enabled ? "checked" : ""} aria-label="${tool.enabled ? "关闭" : "开启"} ${escapeHtml(tool.id)}">
           <span class="switch-track"></span><span class="switch-thumb"></span>
         </label>
       </td>
     </tr>`).join("");
 }
 
-function renderConfigPanel() {
+function renderConfigPanel(animate = false) {
+  window.clearTimeout(panelRefreshTimer);
+  panelRefreshTimer = 0;
   const empty = document.getElementById("emptyState");
   const panel = document.getElementById("configPanel");
+  const tableScrollTop = panel?.querySelector(".table-wrap")?.scrollTop || 0;
+  const focusedControl = panel?.contains(document.activeElement) ? document.activeElement : null;
+  const focusSelector = focusedControl?.dataset.tool
+    ? `[data-tool="${CSS.escape(focusedControl.dataset.tool)}"]`
+    : focusedControl?.dataset.group
+      ? `.group-toggle[data-group="${CSS.escape(focusedControl.dataset.group)}"]`
+      : focusedControl?.id ? `#${CSS.escape(focusedControl.id)}` : "";
   if (!selectedGroupId || !currentConfig) {
     if (empty) empty.style.display = "grid";
-    if (panel) panel.style.display = "none";
+    if (panel) {
+      panel.style.display = "none";
+      panel.classList.remove("panel-enter");
+    }
     return;
   }
 
@@ -867,17 +797,14 @@ function renderConfigPanel() {
   panel.style.display = "block";
 
   const target = currentTargetMeta();
-  const allTools = allToolItems();
-  const enabledTools = getEnabledToolCount();
   const adminIdsStr = globalAdminIds.join("、") || "未配置";
-  const disabledCount = Math.max(allTools.length - enabledTools, 0);
 
   panel.innerHTML = `
     <div class="dashboard-content">
       <section class="welcome-row" id="section-overview-top">
         <div>
-          <h2>${escapeHtml(target.name)}</h2>
-          <span>${escapeHtml(target.kind)}配置</span>
+          <div class="title-line"><h2>${escapeHtml(target.name)}</h2><span class="scope-badge">${escapeHtml(target.kind)}</span></div>
+          ${target.hint ? `<p>${escapeHtml(target.hint)}</p>` : ""}
         </div>
         <div class="welcome-actions">
           <button class="btn btn-secondary compact" id="resetConfigBtn" type="button">重置</button>
@@ -885,43 +812,41 @@ function renderConfigPanel() {
         </div>
       </section>
 
-      <section class="metrics-grid">${renderMetricCards(allTools, enabledTools)}</section>
-
-      <section class="analysis-grid">
-        ${renderTrendCard()}
+      <section class="tool-permissions" id="section-tools">
+        <div class="section-heading">
+          <div><h3>工具权限</h3><p>按分组批量设置，或调整单个工具。</p></div>
+          <span class="section-hint">修改后点击保存</span>
+        </div>
+        <div class="tool-workspace">
+          ${renderBreakdownCard()}
+          <section class="tool-table-card" aria-label="单工具权限">
+            <div class="card-title-row table-head">
+              <h4>工具列表 <span class="table-count">${filteredToolRows().length}</span></h4>
+              <select class="input-field group-filter-select" id="toolGroupFilter" aria-label="筛选工具分组">${renderGroupFilters()}</select>
+            </div>
+            <div class="table-wrap" tabindex="0" role="region" aria-label="工具开关列表">
+              <table>
+                <thead><tr><th scope="col">工具</th><th scope="col">分组</th><th scope="col">启用</th></tr></thead>
+                <tbody>${renderToolGroupCards()}</tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </section>
 
-      <section class="settings-grid">
+      <section class="settings-grid" aria-label="管理员与外部路径">
         ${renderAdminCard(adminIdsStr)}
         ${renderPathOptionsPanel()}
       </section>
 
-      ${renderBreakdownCard()}
-
-      <section class="dashboard-card tool-table-card" id="section-tools">
-        <div class="card-title-row table-head">
-          <div>
-            <h3>工具开关</h3>
-          </div>
-          <div class="table-summary"><strong>${enabledTools}</strong><span>开启</span><strong>${disabledCount}</strong><span>关闭</span></div>
-        </div>
-        <div class="filter-row">${renderGroupFilters()}</div>
-        ${activeGroupFilter ? `<div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>工具</th>
-                <th>分组</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>${renderToolGroupCards()}</tbody>
-          </table>
-        </div>` : ""}
-      </section>
+      <section class="analysis-grid">${renderTrendCard()}</section>
     </div>`;
 
+  panel.classList.toggle("panel-enter", animate);
   bindConfigEvents();
+  const table = panel.querySelector(".table-wrap");
+  if (table) table.scrollTop = tableScrollTop;
+  if (focusSelector) panel.querySelector(focusSelector)?.focus({ preventScroll: true });
 }
 
 function bindConfigEvents() {
@@ -941,7 +866,8 @@ function bindConfigEvents() {
       playUiSound(enabled ? "switch-on" : "switch-off");
       currentConfig.tool_groups[groupName] = enabled;
       asToolItems(toolGroupsDef[groupName] || []).forEach(tool => setToolDisabled(tool.id, !enabled));
-      renderConfigPanel();
+      window.clearTimeout(panelRefreshTimer);
+      panelRefreshTimer = window.setTimeout(() => renderConfigPanel(), window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280);
     });
   });
 
@@ -951,16 +877,17 @@ function bindConfigEvents() {
       const shouldDisable = !event.currentTarget.checked;
       playUiSound(shouldDisable ? "switch-off" : "switch-on");
       setToolDisabled(toolId, shouldDisable);
-      renderConfigPanel();
+      if (!shouldDisable) currentConfig.tool_groups[event.currentTarget.dataset.groupName] = true;
+      window.clearTimeout(panelRefreshTimer);
+      panelRefreshTimer = window.setTimeout(() => renderConfigPanel(), window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280);
     });
   });
 
-  panel.querySelectorAll(".group-filter").forEach(button => {
-    button.addEventListener("click", event => {
-      const groupName = event.currentTarget.dataset.group || "";
-      activeGroupFilter = activeGroupFilter === groupName ? "" : groupName;
-      renderConfigPanel();
-    });
+  panel.querySelector("#toolGroupFilter")?.addEventListener("change", event => {
+    activeGroupFilter = event.currentTarget.value;
+    const table = panel.querySelector(".table-wrap");
+    if (table) table.scrollTop = 0;
+    renderConfigPanel();
   });
 
   panel.querySelectorAll(".segment-button[data-chart-mode]").forEach(button => {
@@ -1007,6 +934,7 @@ function showConfirm(message, title = "确认操作") {
     const msgEl = document.getElementById("confirmMessage");
     const okBtn = document.getElementById("confirmOkBtn");
     const cancelBtn = document.getElementById("confirmCancelBtn");
+    const previousFocus = document.activeElement;
     titleEl.textContent = title;
     msgEl.textContent = message;
     mask.classList.add("show");
@@ -1014,10 +942,24 @@ function showConfirm(message, title = "确认操作") {
       mask.classList.remove("show");
       okBtn.onclick = null;
       cancelBtn.onclick = null;
+      mask.onclick = null;
+      mask.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
       resolve(result);
+    };
+    const onKeyDown = event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cleanup(false);
+      } else if (event.key === "Tab") {
+        event.preventDefault();
+        (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+      }
     };
     okBtn.onclick = () => cleanup(true);
     cancelBtn.onclick = () => cleanup(false);
+    mask.addEventListener("keydown", onKeyDown);
+    okBtn.focus();
     mask.onclick = event => {
       if (event.target === mask) cleanup(false);
     };
@@ -1033,12 +975,8 @@ function touchCurrentGroup() {
   renderGroupList();
 }
 
-function sortContacts(items, keepDefault = false) {
-  return [...items].sort((a, b) => {
-    if (keepDefault && a.id === "__default__") return -1;
-    if (keepDefault && b.id === "__default__") return 1;
-    return Number(b.updated_at || 0) - Number(a.updated_at || 0);
-  });
+function sortContacts(items) {
+  return [...items].sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
 }
 
 async function persistConfig(message = "配置已保存，立即生效") {
