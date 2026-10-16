@@ -12,6 +12,8 @@
   --glass-edge: rgba(245, 247, 255, .36);
   --glass-panel: rgba(18, 24, 45, .075);
   --glass-inner: rgba(255, 255, 255, .045);
+  --tool-row-glass: rgba(255, 255, 255, .075);
+  --tool-row-glass-hover: rgba(255, 255, 255, .12);
   --glass-fill: linear-gradient(135deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .035));
   --glass-fill-hover: linear-gradient(135deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .06));
   --glass-shadow: 0 8px 18px rgba(4, 8, 28, .16), inset 0 1px 0 rgba(255, 255, 255, .16);
@@ -167,8 +169,11 @@ th { position: sticky; top: 0; z-index: 1; height: 40px; background: transparent
 th, td { padding: var(--space-md) var(--space-lg); }
 th:nth-child(2), td:nth-child(2) { width: 132px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 th:last-child, td:last-child { width: 80px; text-align: right; }
-tbody tr { transition: background-color 200ms ease; }
-tbody tr:hover { background: var(--surface); }
+tbody tr { transition: background-color 200ms ease, transform 260ms var(--ease-out); }
+tbody tr > td { background: var(--tool-row-glass); backdrop-filter: blur(14px) saturate(1.18); -webkit-backdrop-filter: blur(14px) saturate(1.18); }
+tbody tr > td:first-child { border-radius: 13px 0 0 13px; }
+tbody tr > td:last-child { border-radius: 0 13px 13px 0; }
+tbody tr:hover > td { background: var(--tool-row-glass-hover); }
 .tool-cell { min-width: 0; }
 .tool-cell strong { display: block; overflow-wrap: anywhere; font: 550 12px/1.5 "Cascadia Code", Consolas, "Microsoft YaHei", monospace; }
 .tool-cell small { display: block; margin-top: var(--space-xs); color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
