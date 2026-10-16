@@ -159,6 +159,8 @@ h4 { font-size: 13px; font-weight: 600; }
 .table-head { min-height: 40px; margin-bottom: var(--space-md); }
 .table-count { margin-left: var(--space-xs); color: var(--muted); font-size: 12px; font-weight: 400; }
 .group-filter-select { max-width: 196px; }
+/* Native option popups need an opaque background for readable white text. */
+.group-filter-select option { background-color: var(--page); color: var(--text); text-shadow: none; }
 .table-wrap { max-height: 600px; overflow: auto; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; text-align: left; }
 th { position: sticky; top: 0; z-index: 1; height: 40px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 650; }
