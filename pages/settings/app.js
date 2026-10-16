@@ -948,6 +948,10 @@ function bindConfigEvents() {
 
   const groupFilterTrigger = panel.querySelector("#toolGroupFilter");
   const groupFilterMenu = panel.querySelector("#toolGroupFilterMenu");
+  const groupFilterControl = panel.querySelector(".group-filter");
+  groupFilterControl?.addEventListener("focusout", event => {
+    if (!groupFilterControl.contains(event.relatedTarget)) setGroupFilterMenuOpen(false);
+  });
   groupFilterTrigger?.addEventListener("click", () => {
     setGroupFilterMenuOpen(groupFilterTrigger.getAttribute("aria-expanded") !== "true", true);
   });
