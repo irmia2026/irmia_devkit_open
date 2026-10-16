@@ -357,6 +357,11 @@ async function init() {
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
   document.getElementById("soundFeedbackBtn")?.addEventListener("click", toggleUiSoundFeedback);
   document.addEventListener("pointerdown", unlockAudioFeedback, { once: true, capture: true });
+  document.addEventListener("pointerdown", event => {
+    if (!event.target?.closest?.(".group-filter")) setGroupFilterMenuOpen(false);
+  }, true);
+  document.addEventListener("scroll", positionGroupFilterMenu, true);
+  window.addEventListener("resize", positionGroupFilterMenu);
   document.addEventListener("keydown", unlockAudioFeedback, { once: true, capture: true });
   document.addEventListener("click", event => {
     const button = event.target?.closest?.("button");
@@ -734,9 +739,67 @@ function renderBulkActions() {
     </div>`;
 }
 
-function renderGroupFilters() {
-  return `<option value="">全部分组</option>` + sortedGroupEntries().map(([groupName, tools]) => `
-    <option value="${escapeHtml(groupName)}" ${activeGroupFilter === groupName ? "selected" : ""}>${escapeHtml(groupName)} (${tools.length})</option>`).join("");
+function renderGroupFilterOptions() {
+  const options = [["", "全部分组", null], ...sortedGroupEntries().map(([groupName, tools]) => [groupName, groupName, tools.length])];
+  return options.map(([value, label, count]) => `
+    <button class="group-filter-option" type="button" role="option" data-value="${escapeHtml(value)}" aria-selected="${activeGroupFilter === value}" tabindex="-1">
+      <span>${escapeHtml(label)}</span>${count === null ? "" : `<span class="group-filter-count">${count}</span>`}
+    </button>`).join("");
+}
+
+function renderGroupFilterControl() {
+  const selectedGroup = sortedGroupEntries().find(([groupName]) => groupName === activeGroupFilter);
+  const selectedLabel = selectedGroup ? `${selectedGroup[0]} (${selectedGroup[1].length})` : "全部分组";
+  return `
+    <div class="group-filter">
+      <button class="input-field group-filter-trigger" id="toolGroupFilter" type="button" aria-label="筛选工具分组" aria-haspopup="listbox" aria-expanded="false" aria-controls="toolGroupFilterMenu">
+        <span>${escapeHtml(selectedLabel)}</span><span class="group-filter-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="group-filter-menu" id="toolGroupFilterMenu" popover="manual" role="listbox" aria-label="工具分组">${renderGroupFilterOptions()}
+      </div>
+    </div>`;
+}
+
+function setGroupFilterMenuOpen(open, focusSelected = false) {
+  const trigger = document.getElementById("toolGroupFilter");
+  const menu = document.getElementById("toolGroupFilterMenu");
+  if (!trigger || !menu) return;
+  if (typeof menu.showPopover === "function") {
+    const isOpen = menu.matches(":popover-open");
+    if (open && !isOpen) menu.showPopover();
+    else if (!open && isOpen) menu.hidePopover();
+  } else {
+    menu.style.display = open ? "flex" : "none";
+  }
+  trigger.setAttribute("aria-expanded", String(open));
+  if (open) positionGroupFilterMenu();
+  if (open && focusSelected) {
+    (menu.querySelector('[aria-selected="true"]') || menu.querySelector("[role=option]"))?.focus();
+  }
+}
+
+function positionGroupFilterMenu() {
+  const trigger = document.getElementById("toolGroupFilter");
+  const menu = document.getElementById("toolGroupFilterMenu");
+  if (!trigger || !menu) return;
+  if (typeof menu.showPopover === "function" ? !menu.matches(":popover-open") : menu.style.display !== "flex") return;
+
+  const rect = trigger.getBoundingClientRect();
+  const edge = 8;
+  const width = Math.min(Math.max(rect.width, 216), window.innerWidth - edge * 2);
+  const desiredHeight = Math.min(420, menu.querySelectorAll("[role=option]").length * 37 + 12);
+  const below = window.innerHeight - rect.bottom - edge * 2;
+  const above = rect.top - edge * 2;
+  const openBelow = below >= Math.min(desiredHeight, 200) || below >= above;
+  const available = Math.max(80, openBelow ? below : above);
+  const height = Math.min(desiredHeight, available);
+  const left = Math.max(edge, Math.min(rect.right - width, window.innerWidth - width - edge));
+  const top = openBelow ? rect.bottom + edge : rect.top - height - edge;
+
+  menu.style.width = `${width}px`;
+  menu.style.maxHeight = `${height}px`;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${Math.max(edge, top)}px`;
 }
 
 function filteredToolRows() {
@@ -822,7 +885,7 @@ function renderConfigPanel(animate = false) {
           <section class="tool-table-card" aria-label="单工具权限">
             <div class="card-title-row table-head">
               <h4>工具列表 <span class="table-count">${filteredToolRows().length}</span></h4>
-              <select class="input-field group-filter-select" id="toolGroupFilter" aria-label="筛选工具分组">${renderGroupFilters()}</select>
+              ${renderGroupFilterControl()}
             </div>
             <div class="table-wrap" tabindex="0" role="region" aria-label="工具开关列表">
               <table>
@@ -883,11 +946,46 @@ function bindConfigEvents() {
     });
   });
 
-  panel.querySelector("#toolGroupFilter")?.addEventListener("change", event => {
-    activeGroupFilter = event.currentTarget.value;
-    const table = panel.querySelector(".table-wrap");
-    if (table) table.scrollTop = 0;
-    renderConfigPanel();
+  const groupFilterTrigger = panel.querySelector("#toolGroupFilter");
+  const groupFilterMenu = panel.querySelector("#toolGroupFilterMenu");
+  groupFilterTrigger?.addEventListener("click", () => {
+    setGroupFilterMenuOpen(groupFilterTrigger.getAttribute("aria-expanded") !== "true", true);
+  });
+  groupFilterTrigger?.addEventListener("keydown", event => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setGroupFilterMenuOpen(true, true);
+    }
+  });
+  groupFilterMenu?.querySelectorAll("[role=option]").forEach(option => {
+    option.addEventListener("click", () => {
+      activeGroupFilter = option.dataset.value || "";
+      const table = panel.querySelector(".table-wrap");
+      if (table) table.scrollTop = 0;
+      renderConfigPanel();
+      document.getElementById("toolGroupFilter")?.focus({ preventScroll: true });
+    });
+    option.addEventListener("keydown", event => {
+      const options = Array.from(groupFilterMenu.querySelectorAll("[role=option]"));
+      const index = options.indexOf(option);
+      let nextIndex = index;
+      if (event.key === "ArrowDown") nextIndex = (index + 1) % options.length;
+      else if (event.key === "ArrowUp") nextIndex = (index - 1 + options.length) % options.length;
+      else if (event.key === "Home") nextIndex = 0;
+      else if (event.key === "End") nextIndex = options.length - 1;
+      else if (event.key === "Escape") {
+        event.preventDefault();
+        setGroupFilterMenuOpen(false);
+        groupFilterTrigger.focus();
+        return;
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        option.click();
+        return;
+      } else return;
+      event.preventDefault();
+      options[nextIndex]?.focus();
+    });
   });
 
   panel.querySelectorAll(".segment-button[data-chart-mode]").forEach(button => {

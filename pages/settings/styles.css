@@ -33,6 +33,7 @@
   --space-section: 32px;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --z-toolbar: 10;
+  --z-dropdown: 12;
   --z-modal: 20;
   --z-toast: 30;
   --z-startup: 40;
@@ -160,9 +161,17 @@ h4 { font-size: 13px; font-weight: 600; }
 .tool-table-card { min-width: 0; }
 .table-head { min-height: 40px; margin-bottom: var(--space-md); }
 .table-count { margin-left: var(--space-xs); color: var(--muted); font-size: 12px; font-weight: 400; }
-.group-filter-select { max-width: 196px; }
-/* Native option popups need an opaque background for readable white text. */
-.group-filter-select option { background-color: var(--page); color: var(--text); text-shadow: none; }
+.group-filter { position: relative; width: min(196px, 100%); z-index: var(--z-dropdown); }
+.group-filter-trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); width: 100%; max-width: none; text-align: left; cursor: pointer; }
+.group-filter-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-filter-chevron { flex: 0 0 auto; color: var(--muted); font-size: 16px; line-height: 1; transition: transform 220ms var(--ease-out); }
+.group-filter-trigger[aria-expanded="true"] .group-filter-chevron { transform: rotate(180deg); }
+.group-filter-menu { position: fixed; inset: auto; right: auto; display: none; flex-direction: column; gap: 3px; width: max(100%, 216px); max-height: 420px; overflow: auto; margin: 0; padding: 6px; border: 1px solid var(--glass-edge); border-radius: 16px; background: rgba(255, 255, 255, .105); box-shadow: 0 12px 28px rgba(4, 8, 28, .28), inset 0 1px 0 rgba(255, 255, 255, .28); backdrop-filter: blur(24px) saturate(1.35); -webkit-backdrop-filter: blur(24px) saturate(1.35); }
+.group-filter-menu:popover-open { display: flex; }
+.group-filter-option { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); width: 100%; min-height: 34px; padding: var(--space-sm) var(--space-md); border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text); text-align: left; text-shadow: var(--text-relief); font-size: 12px; }
+.group-filter-option:hover, .group-filter-option:focus-visible { border-color: var(--glass-edge); background: rgba(255, 255, 255, .14); outline: none; }
+.group-filter-option[aria-selected="true"] { background: rgba(255, 255, 255, .19); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28); }
+.group-filter-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .table-wrap { max-height: 600px; overflow: auto; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; text-align: left; }
 th { position: sticky; top: 0; z-index: 1; height: 40px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 650; }
@@ -289,7 +298,7 @@ tbody tr:hover > td { background: var(--tool-row-glass-hover); }
   .breakdown-row { gap: var(--space-sm); }
   .path-grid { grid-template-columns: minmax(0, 1fr); }
   .card-title-row { gap: var(--space-sm); }
-  .group-filter-select { max-width: 168px; }
+  .group-filter { width: min(168px, 100%); }
   th:nth-child(2), td:nth-child(2) { display: none; }
   .startup-logo { width: 120px; height: 120px; }
   .search-box kbd { display: none; }
