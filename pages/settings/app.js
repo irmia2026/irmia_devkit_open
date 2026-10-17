@@ -12,6 +12,10 @@ let audioUnlocked = false;
 let audioContext = null;
 let api = null;
 let toolGroupsDef = {};
+let toolItemsCache = null;
+let sortedGroupEntriesCache = null;
+let disabledToolsSource = null;
+let disabledToolsCache = new Set();
 let groupsData = [];
 let contactsData = [];
 let selectedGroupId = "";
@@ -23,6 +27,7 @@ let searchTerm = "";
 let activeGroupFilter = "";
 let chartMode = "live";
 let panelRefreshTimer = 0;
+let panelExitPromise = null;
 
 const collapsedMenus = { groups: true, contacts: true };
 const DEFAULT_GROUP = {
@@ -168,15 +173,19 @@ function asToolItems(tools) {
 }
 
 function allToolItems() {
-  return Object.entries(toolGroupsDef).flatMap(([groupName, tools]) => (
+  if (toolItemsCache) return toolItemsCache;
+  toolItemsCache = Object.entries(toolGroupsDef).flatMap(([groupName, tools]) => (
     asToolItems(tools).map(tool => ({ ...tool, groupName }))
   ));
+  return toolItemsCache;
 }
 
 function sortedGroupEntries() {
-  return Object.entries(toolGroupsDef)
+  if (sortedGroupEntriesCache) return sortedGroupEntriesCache;
+  sortedGroupEntriesCache = Object.entries(toolGroupsDef)
     .map(([groupName, rawTools]) => [groupName, asToolItems(rawTools)])
     .sort((a, b) => b[1].length - a[1].length || String(a[0]).localeCompare(String(b[0]), "zh-Hans-CN"));
+  return sortedGroupEntriesCache;
 }
 
 function savePaletteLocally(mode) {
@@ -406,7 +415,13 @@ async function init() {
 async function loadToolGroups() {
   try {
     const data = await api.safeGet("tool_groups");
-    if (data.ok) toolGroupsDef = data.groups || {};
+    if (data.ok) {
+      toolGroupsDef = data.groups || {};
+      toolItemsCache = null;
+      sortedGroupEntriesCache = null;
+      disabledToolsSource = null;
+      disabledToolsCache = new Set();
+    }
   } catch (e) {
     console.error("loadToolGroups", e);
   }
@@ -568,15 +583,19 @@ function renderGroupList() {
 }
 
 async function selectGroup(groupId) {
+  if (groupId === selectedGroupId && currentConfig) return;
   const requestId = ++groupRequestId;
+  const panelExit = transitionConfigPanelOut();
   selectedGroupId = groupId;
   currentConfig = null;
   activeGroupFilter = "";
   document.querySelectorAll(".nav-jump").forEach(button => button.classList.toggle("active", button.dataset.jump === "tools"));
   renderGroupList();
-  renderConfigPanel();
   try {
-    const data = await api.safeGet("group_config", { group_id: groupId });
+    const [data] = await Promise.all([
+      api.safeGet("group_config", { group_id: groupId }),
+      panelExit,
+    ]);
     if (requestId !== groupRequestId) return;
     if (!data.ok) throw new Error("group_config failed");
     currentConfig = normalizeConfig({ ...data.config, group_id: groupId });
@@ -584,8 +603,40 @@ async function selectGroup(groupId) {
   } catch (e) {
     if (requestId !== groupRequestId) return;
     console.error("selectGroup", e);
+    renderConfigPanel();
     showToast("配置加载失败");
   }
+}
+
+function transitionConfigPanelOut() {
+  const panel = document.getElementById("configPanel");
+  const content = panel?.querySelector(".dashboard-content");
+  if (!panel || panel.style.display === "none" || !content) return Promise.resolve();
+  if (panelExitPromise) return panelExitPromise;
+
+  panel.inert = true;
+  panel.setAttribute("aria-hidden", "true");
+  panel.classList.remove("panel-enter");
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+    panel.style.display = "none";
+    return Promise.resolve();
+  }
+
+  panel.classList.add("panel-exit");
+  panelExitPromise = new Promise(resolve => {
+    let timeoutId = 0;
+    const finish = event => {
+      if (event && event.target !== content) return;
+      window.clearTimeout(timeoutId);
+      content.removeEventListener("animationend", finish);
+      resolve();
+    };
+    content.addEventListener("animationend", finish);
+    timeoutId = window.setTimeout(finish, 340);
+  }).finally(() => {
+    panelExitPromise = null;
+  });
+  return panelExitPromise;
 }
 
 function normalizeConfig(config) {
@@ -603,13 +654,21 @@ function normalizeConfig(config) {
   };
 }
 
+function currentDisabledTools() {
+  const source = currentConfig?.disabled_tools;
+  if (source === disabledToolsSource) return disabledToolsCache;
+  disabledToolsSource = source;
+  disabledToolsCache = new Set(Array.isArray(source) ? source : []);
+  return disabledToolsCache;
+}
+
 function getEnabledToolCount() {
-  const disabled = new Set(currentConfig?.disabled_tools || []);
+  const disabled = currentDisabledTools();
   return allToolItems().filter(tool => currentConfig?.tool_groups?.[tool.groupName] !== false && !disabled.has(tool.id)).length;
 }
 
 function getGroupStats(groupName, tools) {
-  const disabled = new Set(currentConfig?.disabled_tools || []);
+  const disabled = currentDisabledTools();
   const enabled = currentConfig?.tool_groups?.[groupName] === false ? 0 : tools.filter(tool => !disabled.has(tool.id)).length;
   const total = tools.length;
   return {
@@ -803,7 +862,7 @@ function positionGroupFilterMenu() {
 }
 
 function filteredToolRows() {
-  const disabled = new Set(currentConfig.disabled_tools || []);
+  const disabled = currentDisabledTools();
   return allToolItems().filter(tool => {
     const groupOk = !activeGroupFilter || tool.groupName === activeGroupFilter;
     if (!groupOk) return false;
@@ -812,8 +871,7 @@ function filteredToolRows() {
   }).map(tool => ({ ...tool, enabled: currentConfig.tool_groups?.[tool.groupName] !== false && !disabled.has(tool.id) }));
 }
 
-function renderToolGroupCards() {
-  const rows = filteredToolRows();
+function renderToolGroupCards(rows = filteredToolRows()) {
   if (!rows.length) {
     return `<tr><td colspan="3"><div class="table-empty">没有匹配的工具</div></td></tr>`;
   }
@@ -850,7 +908,9 @@ function renderConfigPanel(animate = false) {
     if (empty) empty.style.display = "grid";
     if (panel) {
       panel.style.display = "none";
-      panel.classList.remove("panel-enter");
+      panel.classList.remove("panel-enter", "panel-exit");
+      panel.inert = false;
+      panel.removeAttribute("aria-hidden");
     }
     return;
   }
@@ -858,9 +918,13 @@ function renderConfigPanel(animate = false) {
   if (empty) empty.style.display = "none";
   if (!panel) return;
   panel.style.display = "block";
+  panel.classList.remove("panel-exit");
+  panel.inert = false;
+  panel.removeAttribute("aria-hidden");
 
   const target = currentTargetMeta();
   const adminIdsStr = globalAdminIds.join("、") || "未配置";
+  const filteredRows = filteredToolRows();
 
   panel.innerHTML = `
     <div class="dashboard-content">
@@ -884,13 +948,13 @@ function renderConfigPanel(animate = false) {
           ${renderBreakdownCard()}
           <section class="tool-table-card" aria-label="单工具权限">
             <div class="card-title-row table-head">
-              <h4>工具列表 <span class="table-count">${filteredToolRows().length}</span></h4>
+              <h4>工具列表 <span class="table-count">${filteredRows.length}</span></h4>
               ${renderGroupFilterControl()}
             </div>
             <div class="table-wrap" tabindex="0" role="region" aria-label="工具开关列表">
               <table>
                 <thead><tr><th scope="col">工具</th><th scope="col">分组</th><th scope="col">启用</th></tr></thead>
-                <tbody>${renderToolGroupCards()}</tbody>
+                <tbody>${renderToolGroupCards(filteredRows)}</tbody>
               </table>
             </div>
           </section>
@@ -1020,13 +1084,15 @@ function setAllToolsState(enabled) {
     currentConfig.tool_groups[groupName] = enabled;
   }
   currentConfig.disabled_tools = enabled ? [] : allToolItems().map(tool => tool.id).sort();
+  disabledToolsSource = null;
 }
 
 function setToolDisabled(toolId, disabled) {
-  const set = new Set(currentConfig.disabled_tools || []);
+  const set = new Set(currentDisabledTools());
   if (disabled) set.add(toolId);
   else set.delete(toolId);
   currentConfig.disabled_tools = Array.from(set).sort();
+  disabledToolsSource = null;
 }
 
 function showConfirm(message, title = "确认操作") {
@@ -1127,6 +1193,7 @@ async function resetConfig() {
   const toolGroups = {};
   for (const groupName of Object.keys(toolGroupsDef)) toolGroups[groupName] = true;
   currentConfig = { group_id: selectedGroupId, extra_admin_ids: "", tool_groups: toolGroups, disabled_tools: [] };
+  disabledToolsSource = null;
   renderConfigPanel();
   showToast("已重置当前配置");
 }
@@ -1164,3 +1231,4 @@ async function boot() {
 }
 
 boot();
+

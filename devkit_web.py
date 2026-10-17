@@ -139,6 +139,9 @@ class DevkitWebController:
             self.plugin._group_config_enabled = True
         if hasattr(self.plugin, "_group_configs_cache"):
             self.plugin._group_configs_cache = configs
+            invalidate_cache = getattr(self.plugin, "_invalidate_group_policy_cache", None)
+            if callable(invalidate_cache):
+                invalidate_cache()
         else:
             logger.warning("plugin 缺少 _group_configs_cache 属性，缓存未更新")
         self._persist_group_config_enabled()
@@ -523,3 +526,4 @@ class DevkitWebController:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(prefs, f, ensure_ascii=False, indent=2)
         os.replace(tmp, prefs_file)
+
