@@ -26,7 +26,6 @@ let pathOptions = { es_path: "", gh_path: "", backup_dir: "" };
 let searchTerm = "";
 let activeGroupFilter = "";
 let chartMode = "live";
-let panelRefreshTimer = 0;
 let panelExitPromise = null;
 
 const collapsedMenus = { groups: true, contacts: true };
@@ -707,7 +706,7 @@ function renderTrendCard() {
       ? height
       : Math.round((stats.enabled / 20) * 160);
     return `
-      <div class="chart-column" title="${escapeHtml(groupName)}：${stats.enabled}/${stats.total}">
+      <div class="chart-column" data-group-name="${escapeHtml(groupName)}" title="${escapeHtml(groupName)}：${stats.enabled}/${stats.total}">
         <div class="bar-rail">
           <i class="bar-total" style="height:${height}px"></i>
           <i class="bar-enabled" style="height:${enabledHeight}px"></i>
@@ -745,7 +744,7 @@ function renderBreakdownCard() {
   const rows = entries.map(([groupName, tools]) => {
     const stats = getGroupStats(groupName, tools);
     return `
-      <div class="breakdown-row ${stats.groupEnabled ? "" : "muted"}">
+      <div class="breakdown-row ${stats.groupEnabled ? "" : "muted"}" data-group-name="${escapeHtml(groupName)}">
         <div class="breakdown-copy">
           <strong>${escapeHtml(groupName)}</strong>
           <span>${stats.enabled}/${stats.total} 可用</span>
@@ -893,8 +892,6 @@ function renderToolGroupCards(rows = filteredToolRows()) {
 }
 
 function renderConfigPanel(animate = false) {
-  window.clearTimeout(panelRefreshTimer);
-  panelRefreshTimer = 0;
   const empty = document.getElementById("emptyState");
   const panel = document.getElementById("configPanel");
   const tableScrollTop = panel?.querySelector(".table-wrap")?.scrollTop || 0;
@@ -992,9 +989,14 @@ function bindConfigEvents() {
       const enabled = event.currentTarget.checked;
       playUiSound(enabled ? "switch-on" : "switch-off");
       currentConfig.tool_groups[groupName] = enabled;
-      asToolItems(toolGroupsDef[groupName] || []).forEach(tool => setToolDisabled(tool.id, !enabled));
-      window.clearTimeout(panelRefreshTimer);
-      panelRefreshTimer = window.setTimeout(() => renderConfigPanel(), window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280);
+      const disabled = currentDisabledTools();
+      for (const tool of asToolItems(toolGroupsDef[groupName] || [])) {
+        if (enabled) disabled.delete(tool.id);
+        else disabled.add(tool.id);
+      }
+      currentConfig.disabled_tools = Array.from(disabled).sort();
+      disabledToolsSource = currentConfig.disabled_tools;
+      syncToolControls();
     });
   });
 
@@ -1005,8 +1007,7 @@ function bindConfigEvents() {
       playUiSound(shouldDisable ? "switch-off" : "switch-on");
       setToolDisabled(toolId, shouldDisable);
       if (!shouldDisable) currentConfig.tool_groups[event.currentTarget.dataset.groupName] = true;
-      window.clearTimeout(panelRefreshTimer);
-      panelRefreshTimer = window.setTimeout(() => renderConfigPanel(), window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280);
+      syncToolControls();
     });
   });
 
@@ -1059,24 +1060,64 @@ function bindConfigEvents() {
   panel.querySelectorAll(".segment-button[data-chart-mode]").forEach(button => {
     button.addEventListener("click", event => {
       chartMode = event.currentTarget.dataset.chartMode === "group" ? "group" : "live";
-      renderConfigPanel();
+      syncToolControls();
       showToast(chartMode === "group" ? "图表已切换为分组容量" : "图表已切换为实时启用");
     });
   });
 
-  document.getElementById("enableAllToolsBtn")?.addEventListener("click", async () => {
+  document.getElementById("enableAllToolsBtn")?.addEventListener("click", () => {
     setAllToolsState(true);
-    renderConfigPanel();
+    syncToolControls();
     showToast("已开启全部工具");
   });
-  document.getElementById("disableAllToolsBtn")?.addEventListener("click", async () => {
+  document.getElementById("disableAllToolsBtn")?.addEventListener("click", () => {
     setAllToolsState(false);
-    renderConfigPanel();
+    syncToolControls();
     showToast("已关闭全部工具");
   });
   document.getElementById("saveConfigBtn")?.addEventListener("click", saveConfig);
   document.getElementById("resetConfigBtn")?.addEventListener("click", resetConfig);
   document.getElementById("savePathOptionsBtn")?.addEventListener("click", savePathOptions);
+}
+
+function syncToolControls() {
+  const panel = document.getElementById("configPanel");
+  if (!panel || !currentConfig) return;
+  const disabled = currentDisabledTools();
+  const statsByGroup = new Map(sortedGroupEntries().map(([groupName, tools]) => [groupName, getGroupStats(groupName, tools)]));
+
+  panel.querySelectorAll(".tool-action").forEach(input => {
+    const enabled = currentConfig.tool_groups[input.dataset.groupName] !== false && !disabled.has(input.dataset.tool);
+    if (input.checked !== enabled) input.checked = enabled;
+    input.closest("tr").classList.toggle("disabled-row", !enabled);
+    const label = `${enabled ? "关闭" : "开启"} ${input.dataset.tool}`;
+    if (input.getAttribute("aria-label") !== label) {
+      input.setAttribute("aria-label", label);
+      input.closest("label").title = enabled ? "关闭工具" : "开启工具";
+    }
+  });
+  panel.querySelectorAll(".breakdown-row").forEach(row => {
+    const stats = statsByGroup.get(row.dataset.groupName);
+    const count = `${stats.enabled}/${stats.total} 可用`;
+    const copy = row.querySelector(".breakdown-copy span");
+    if (copy.textContent !== count) copy.textContent = count;
+    row.classList.toggle("muted", !stats.groupEnabled);
+    row.querySelector(".group-toggle").checked = stats.groupEnabled;
+  });
+  panel.querySelectorAll(".chart-column").forEach(column => {
+    const groupName = column.dataset.groupName;
+    const stats = statsByGroup.get(groupName);
+    column.title = `${groupName}：${stats.enabled}/${stats.total}`;
+    const height = chartMode === "group" ? Math.min(160, Math.round(stats.total * 8)) : Math.round(stats.enabled * 8);
+    column.querySelector(".bar-enabled").style.height = `${height}px`;
+  });
+  panel.querySelector(".chart-meta span").textContent = chartMode === "group" ? "分组容量" : "当前对象";
+  panel.querySelector(".chart-meta strong").textContent = chartMode === "group"
+    ? statsByGroup.size
+    : Array.from(statsByGroup.values()).reduce((sum, stats) => sum + stats.enabled, 0);
+  panel.querySelectorAll(".segment-button[data-chart-mode]").forEach(button => {
+    button.classList.toggle("active", button.dataset.chartMode === chartMode);
+  });
 }
 
 function setAllToolsState(enabled) {
@@ -1088,11 +1129,11 @@ function setAllToolsState(enabled) {
 }
 
 function setToolDisabled(toolId, disabled) {
-  const set = new Set(currentDisabledTools());
+  const set = currentDisabledTools();
   if (disabled) set.add(toolId);
   else set.delete(toolId);
   currentConfig.disabled_tools = Array.from(set).sort();
-  disabledToolsSource = null;
+  disabledToolsSource = currentConfig.disabled_tools;
 }
 
 function showConfirm(message, title = "确认操作") {
@@ -1231,4 +1272,3 @@ async function boot() {
 }
 
 boot();
-

@@ -26,6 +26,23 @@ class MockPlatform:
 
 
 class TestDevkitWebGroups:
+    def test_runtime_config_update_invalidates_normalized_policy_cache(self):
+        plugin = SimpleNamespace(
+            _group_config_enabled=False,
+            _group_configs_cache={},
+            _invalidate_group_policy_cache=MagicMock(),
+        )
+        controller = DevkitWebController(MagicMock(), plugin)
+        controller._persist_group_config_enabled = MagicMock()
+        configs = {"__default__": {"disabled_tools": ["safe_edit"]}}
+
+        controller._apply_runtime_group_configs(configs)
+
+        assert plugin._group_config_enabled is True
+        assert plugin._group_configs_cache is configs
+        plugin._invalidate_group_policy_cache.assert_called_once_with()
+        controller._persist_group_config_enabled.assert_called_once_with()
+
     def test_group_list_ignores_config_only_left_groups(self, tmp_path):
         cfg_path = Path(tmp_path) / "group_configs.json"
         cfg_path.write_text(

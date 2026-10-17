@@ -326,4 +326,3 @@ tbody tr:hover > td { background: var(--tool-row-glass-hover); }
   .startup-loader.is-leaving .startup-logo { animation: none; transform: none; }
   @keyframes reduced-dismiss { to { opacity: 0; } }
 }
-

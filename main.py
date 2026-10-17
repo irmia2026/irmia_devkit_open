@@ -257,6 +257,7 @@ class Main(star.Star):
         return set()
 
     def _invalidate_group_policy_cache(self) -> None:
+        """Discard normalized policies after a runtime configuration update."""
         cache = getattr(self, "_group_policy_cache", None)
         if cache is not None:
             cache.clear()
@@ -285,10 +286,14 @@ class Main(star.Star):
 
         config = self._group_config_for_event(event)
         policy = (
-            frozenset(self._parse_ids(config.get("extra_admin_ids", ""))),
-            config["tool_groups"],
-            frozenset(config["disabled_tools"]),
-        ) if config else None
+            (
+                frozenset(self._parse_ids(config.get("extra_admin_ids", ""))),
+                config["tool_groups"],
+                frozenset(config["disabled_tools"]),
+            )
+            if config
+            else None
+        )
         cache[cache_key] = policy
         if len(cache) > _GROUP_POLICY_CACHE_LIMIT:
             cache.popitem(last=False)
@@ -330,7 +335,6 @@ class Main(star.Star):
                 merged["disabled_tools"] = [str(x).strip() for x in raw_disabled if str(x).strip()]
         return merged
 
-
     def _is_group_extra_admin(self, event: AstrMessageEvent) -> bool:
         sender_id = str(event.get_sender_id() or "").strip()
         policy = self._group_policy_for_event(event)
@@ -350,7 +354,7 @@ class Main(star.Star):
         return self._is_tool_enabled_for_policy(self._group_policy_for_event(event), tool_name)
 
     def _is_tool_allowed_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
-        # 分群工具开关对管理员也生效；管理员只绕过身份权限，不绕过工具禁用。
+        # Administrators bypass identity checks, but still respect disabled tools.
         policy = self._group_policy_for_event(event)
         if not self._is_tool_enabled_for_policy(policy, tool_name):
             return False
@@ -454,4 +458,3 @@ class Main(star.Star):
     @property
     def _allowed_ids(self) -> set:
         return self._allowed_ids_cache
-
