@@ -7,6 +7,15 @@ const PALETTE_MODES = ["luxury", "bluewhite", "vivid"];
 const PALETTE_LABELS = { luxury: "流光溢彩", bluewhite: "晴空", vivid: "珊瑚" };
 
 let paletteMode = "luxury";
+let requestedPaletteMode = "";
+let paletteRequestId = 0;
+let paletteUserChangeVersion = 0;
+const paletteWallpaperUrls = new Map();
+const paletteWallpaperBlobs = new Map();
+const paletteWallpaperLoads = new Map();
+const paletteObjectUrls = new Set();
+let activePaletteObjectUrl = "";
+let paletteCachePrimePromise = null;
 let uiSoundEnabled = true;
 let audioUnlocked = false;
 let audioContext = null;
@@ -294,38 +303,181 @@ function refreshPaletteControls() {
   refreshAudioControls();
 }
 
-function applyPalette(mode = getStoredPaletteMode()) {
-  paletteMode = PALETTE_MODES.includes(mode) ? mode : "luxury";
-  document.documentElement.dataset.palette = paletteMode;
+function getPaletteWallpaperUrl(mode) {
+  const cachedUrl = paletteWallpaperUrls.get(mode);
+  if (cachedUrl) return cachedUrl;
+
+  const root = document.documentElement;
+  const hadInlineWallpaper = root.style.getPropertyValue("--wallpaper");
+  const inlineWallpaperPriority = root.style.getPropertyPriority("--wallpaper");
+  const hadPaletteAttribute = root.hasAttribute("data-palette");
+  const previousMode = root.dataset.palette;
+  root.style.removeProperty("--wallpaper");
+
+  let wallpaper = "";
+  try {
+    root.dataset.palette = mode;
+    wallpaper = getComputedStyle(root).getPropertyValue("--wallpaper").trim();
+  } finally {
+    if (hadPaletteAttribute) root.dataset.palette = previousMode || "";
+    else delete root.dataset.palette;
+    if (hadInlineWallpaper) {
+      root.style.setProperty("--wallpaper", hadInlineWallpaper, inlineWallpaperPriority);
+    }
+  }
+
+  const match = wallpaper.match(/^url\((?:"([^"]*)"|'([^']*)'|([^)]*))\)$/);
+  const assetUrl = match?.[1] ?? match?.[2] ?? match?.[3]?.trim();
+  if (!assetUrl) throw new Error(`No wallpaper URL configured for ${mode}`);
+
+  const stylesheet = [...document.styleSheets]
+    .find(sheet => sheet.href?.includes("styles.css"));
+  const resolvedUrl = new URL(assetUrl, stylesheet?.href || document.baseURI).href;
+  paletteWallpaperUrls.set(mode, resolvedUrl);
+  return resolvedUrl;
+}
+
+function revokePaletteObjectUrl(objectUrl) {
+  if (!objectUrl || !paletteObjectUrls.has(objectUrl)) return;
+  paletteObjectUrls.delete(objectUrl);
+  URL.revokeObjectURL(objectUrl);
+}
+
+function schedulePaletteObjectUrlRelease(objectUrl) {
+  if (!objectUrl || objectUrl === activePaletteObjectUrl) return;
+  window.setTimeout(() => {
+    if (objectUrl !== activePaletteObjectUrl) revokePaletteObjectUrl(objectUrl);
+  }, 900);
+}
+
+async function fetchPaletteWallpaperBlob(mode) {
+  const cachedBlob = paletteWallpaperBlobs.get(mode);
+  if (cachedBlob) return cachedBlob;
+
+  const pendingLoad = paletteWallpaperLoads.get(mode);
+  if (pendingLoad) return pendingLoad;
+
+  const wallpaperUrl = getPaletteWallpaperUrl(mode);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  const load = fetch(wallpaperUrl, { cache: "no-store", credentials: "same-origin", signal: controller.signal })
+    .then(async response => {
+      if (!response.ok) throw new Error(`Wallpaper request failed: ${response.status}`);
+      const blob = await response.blob();
+      if (!blob.type.startsWith("image/")) {
+        throw new Error(`Wallpaper response is not an image: ${blob.type || "unknown"}`);
+      }
+      paletteWallpaperBlobs.set(mode, blob);
+      return blob;
+    })
+    .finally(() => {
+      window.clearTimeout(timeout);
+      paletteWallpaperLoads.delete(mode);
+    });
+
+  paletteWallpaperLoads.set(mode, load);
+  return load;
+}
+
+async function preloadPaletteWallpaper(mode, requestId) {
+  const blob = await fetchPaletteWallpaperBlob(mode);
+  if (requestId !== paletteRequestId) return "";
+
+  const objectUrl = URL.createObjectURL(blob);
+  paletteObjectUrls.add(objectUrl);
+  const image = new Image();
+  image.decoding = "async";
+  try {
+    if (typeof image.decode === "function") {
+      image.src = objectUrl;
+      await image.decode();
+    } else await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error(`Failed to decode wallpaper: ${mode}`));
+      image.src = objectUrl;
+    });
+  } catch (error) {
+    if (paletteWallpaperBlobs.get(mode) === blob) paletteWallpaperBlobs.delete(mode);
+    revokePaletteObjectUrl(objectUrl);
+    throw error;
+  }
+  return objectUrl;
+}
+
+function primePaletteWallpapers() {
+  if (paletteCachePrimePromise) return paletteCachePrimePromise;
+  paletteCachePrimePromise = Promise.allSettled(
+    PALETTE_MODES.map(mode => fetchPaletteWallpaperBlob(mode)),
+  ).then(results => {
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        console.warn(`Unable to cache ${PALETTE_LABELS[PALETTE_MODES[index]]} wallpaper`, result.reason);
+      }
+    });
+    return results;
+  });
+  return paletteCachePrimePromise;
+}
+
+async function applyPalette(mode = getStoredPaletteMode(), { quiet = true } = {}) {
+  const nextMode = PALETTE_MODES.includes(mode) ? mode : "luxury";
+  const requestId = ++paletteRequestId;
+  requestedPaletteMode = nextMode;
+  if (nextMode === paletteMode && activePaletteObjectUrl) return true;
+
+  let nextObjectUrl = "";
+  try {
+    nextObjectUrl = await preloadPaletteWallpaper(nextMode, requestId);
+  } catch (error) {
+    if (requestId === paletteRequestId) {
+      requestedPaletteMode = document.documentElement.dataset.palette || paletteMode;
+      console.warn(`Unable to load ${PALETTE_LABELS[nextMode]} wallpaper`, error);
+      if (!quiet) showToast("背景加载失败，已保留当前背景");
+    }
+    return false;
+  }
+
+  if (!nextObjectUrl || requestId !== paletteRequestId) {
+    revokePaletteObjectUrl(nextObjectUrl);
+    return false;
+  }
+
+  const previousObjectUrl = activePaletteObjectUrl;
+  paletteMode = nextMode;
+  document.documentElement.dataset.palette = nextMode;
+  document.documentElement.style.setProperty("--wallpaper", `url("${nextObjectUrl}")`);
+  activePaletteObjectUrl = nextObjectUrl;
+  savePaletteLocally(nextMode);
   refreshPaletteControls();
+  schedulePaletteObjectUrlRelease(previousObjectUrl);
+  return true;
 }
 
 async function cyclePaletteMode() {
-  const current = document.documentElement.dataset.palette || paletteMode || getStoredPaletteMode();
+  const current = requestedPaletteMode || document.documentElement.dataset.palette || paletteMode || getStoredPaletteMode();
   const currentIndex = PALETTE_MODES.includes(current) ? PALETTE_MODES.indexOf(current) : 0;
   const next = PALETTE_MODES[(currentIndex + 1) % PALETTE_MODES.length];
-  paletteMode = next;
-  savePaletteLocally(next);
-  applyPalette(next);
+  paletteUserChangeVersion += 1;
+  const applied = await applyPalette(next, { quiet: false });
+  if (!applied) return;
   await saveUiPreferences();
   showToast(`配色已切换为 ${PALETTE_LABELS[next]}`);
 }
 
 async function loadUiPreferences() {
+  const paletteVersionAtRequest = paletteUserChangeVersion;
   try {
     const data = await api.safeGet("ui_preferences");
     const prefs = data.preferences || {};
     const palette = prefs.palette_mode;
-    if (PALETTE_MODES.includes(palette)) {
-      paletteMode = palette;
-      savePaletteLocally(palette);
+    if (PALETTE_MODES.includes(palette) && paletteVersionAtRequest === paletteUserChangeVersion) {
+      await applyPalette(palette);
     }
     uiSoundEnabled = prefs.ui_sound_enabled !== false;
   } catch (e) {
     console.warn("loadUiPreferences", e);
   }
   document.documentElement.dataset.theme = "dark";
-  applyPalette(paletteMode);
   refreshAudioControls();
 }
 
@@ -360,7 +512,9 @@ async function toggleUiSoundFeedback() {
 async function init() {
   setStartupLoading("读取配置", "正在加载工具与权限配置");
   document.documentElement.dataset.theme = "dark";
-  applyPalette();
+  // Asset credentials expire quickly; retain compressed files, not decoded bitmaps.
+  primePaletteWallpapers();
+  const initialPaletteReady = applyPalette(getStoredPaletteMode());
 
   document.getElementById("paletteToggleBtn")?.addEventListener("click", cyclePaletteMode);
   document.getElementById("soundFeedbackBtn")?.addEventListener("click", toggleUiSoundFeedback);
@@ -404,7 +558,7 @@ async function init() {
     });
   });
 
-  await Promise.all([loadUiPreferences(), loadToolGroups(), loadGlobalAdmins(), loadPathOptions(), loadContacts()]);
+  await Promise.all([initialPaletteReady, loadUiPreferences(), loadToolGroups(), loadGlobalAdmins(), loadPathOptions(), loadContacts()]);
   renderConfigPanel();
   const logo = document.querySelector(".startup-logo");
   if (logo?.decode) await logo.decode().catch(() => {});
@@ -1272,3 +1426,4 @@ async function boot() {
 }
 
 boot();
+
