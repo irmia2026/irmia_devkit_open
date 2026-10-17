@@ -173,13 +173,13 @@ h4 { font-size: 13px; font-weight: 600; }
 .group-filter-option:hover, .group-filter-option:focus-visible { border-color: var(--glass-edge); background: rgba(255, 255, 255, .14); outline: none; }
 .group-filter-option[aria-selected="true"] { background: rgba(255, 255, 255, .19); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28); }
 .group-filter-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
-.table-wrap { max-height: 600px; overflow: auto; contain: layout paint; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.table-wrap { max-height: 600px; overflow: auto; contain: layout paint; border: 0; border-radius: 0; background: rgba(18, 24, 45, .68); box-shadow: none; backdrop-filter: blur(20px) saturate(1.08); -webkit-backdrop-filter: blur(20px) saturate(1.08); }
 table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; text-align: left; }
 th { position: sticky; top: 0; z-index: 1; height: 40px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 650; }
 th, td { padding: var(--space-md) var(--space-lg); }
 th:nth-child(2), td:nth-child(2) { width: 132px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 th:last-child, td:last-child { width: 80px; text-align: right; }
-/* Share the shell's glass surface so tool rows do not add a tinted backdrop. */
+/* Rows share one blurred surface so wallpaper brightness cannot vary by row. */
 tbody tr > td { background: transparent; transition: background-color 180ms ease; }
 tbody tr > td:first-child { border-radius: 13px 0 0 13px; }
 tbody tr > td:last-child { border-radius: 0 13px 13px 0; }
@@ -324,3 +324,4 @@ tbody tr:hover > td, tbody tr:focus-within > td { background: var(--surface-soft
   .startup-loader.is-leaving .startup-logo { animation: none; transform: none; }
   @keyframes reduced-dismiss { to { opacity: 0; } }
 }
+
