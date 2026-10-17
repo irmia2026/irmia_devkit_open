@@ -9,6 +9,7 @@ import json
 import os
 import copy
 import sqlite3
+from collections import OrderedDict
 
 from astrbot.api import logger, star
 from astrbot.api.star import StarTools
@@ -19,6 +20,12 @@ from .tools import config as _tool_config
 
 from .tools._registry import TOOL_GROUPS, _ALL_TOOLS
 from .tools._auth import protect_tool, build_allowed_ids
+
+_TOOL_GROUP_BY_NAME = {}
+for _group_name, _tool_names in TOOL_GROUPS.items():
+    for _tool_name in _tool_names:
+        _TOOL_GROUP_BY_NAME.setdefault(_tool_name, _group_name)
+_GROUP_POLICY_CACHE_LIMIT = 128
 
 _DEFAULT_CONFIG = {
     "owner_sid": "",
@@ -151,6 +158,7 @@ class Main(star.Star):
         self._config_path = config_path
         self._group_config_enabled = bool(_config.get("group_config_enabled", False))
         self._group_configs_path = os.path.join(str(data_dir), "group_configs.json")
+        self._group_policy_cache = OrderedDict()
         self._group_configs_cache = self._load_group_configs() if self._group_config_enabled else {}
 
         tool_groups = _config.get("tool_groups", {})
@@ -248,6 +256,49 @@ class Main(star.Star):
             return {str(x).strip() for x in raw if str(x).strip()}
         return set()
 
+    def _invalidate_group_policy_cache(self) -> None:
+        """Discard normalized policies after a runtime configuration update."""
+        cache = getattr(self, "_group_policy_cache", None)
+        if cache is not None:
+            cache.clear()
+
+    def _group_policy_for_event(self, event: AstrMessageEvent):
+        """Reuse normalized permissions until configuration changes.
+
+        Args:
+            event: Message identifying the group or private chat.
+
+        Returns:
+            Cached admin IDs, group switches and disabled tools, or None.
+        """
+        if not self._group_config_enabled:
+            return None
+        group_id = self._event_config_id(event)
+        configs = self._group_configs_cache if isinstance(self._group_configs_cache, dict) else {}
+        override = configs.get(group_id) if group_id else None
+        cache_key = group_id if isinstance(override, dict) and override else "__default__"
+        cache = getattr(self, "_group_policy_cache", None)
+        if cache is None:
+            cache = self._group_policy_cache = OrderedDict()
+        if cache_key in cache:
+            cache.move_to_end(cache_key)
+            return cache[cache_key]
+
+        config = self._group_config_for_event(event)
+        policy = (
+            (
+                frozenset(self._parse_ids(config.get("extra_admin_ids", ""))),
+                config["tool_groups"],
+                frozenset(config["disabled_tools"]),
+            )
+            if config
+            else None
+        )
+        cache[cache_key] = policy
+        if len(cache) > _GROUP_POLICY_CACHE_LIMIT:
+            cache.popitem(last=False)
+        return policy
+
     def _group_config_for_event(self, event: AstrMessageEvent) -> dict:
         if not self._group_config_enabled:
             return {}
@@ -272,7 +323,7 @@ class Main(star.Star):
             "disabled_tools": [str(x).strip() for x in default_disabled if str(x).strip()],
         }
         if group_cfg:
-            # 群配置覆盖默认值，非叠加。
+            # A group override replaces the corresponding default value.
             merged["extra_admin_ids"] = group_cfg.get("extra_admin_ids", merged["extra_admin_ids"])
             raw_groups = group_cfg.get("tool_groups", {})
             if isinstance(raw_groups, dict):
@@ -286,33 +337,31 @@ class Main(star.Star):
 
     def _is_group_extra_admin(self, event: AstrMessageEvent) -> bool:
         sender_id = str(event.get_sender_id() or "").strip()
-        cfg = self._group_config_for_event(event)
-        return sender_id in self._parse_ids(cfg.get("extra_admin_ids", ""))
+        policy = self._group_policy_for_event(event)
+        return bool(policy and sender_id in policy[0])
+
+    @staticmethod
+    def _is_tool_enabled_for_policy(policy, tool_name: str) -> bool:
+        if policy is None:
+            return True
+        _, group_switches, disabled_tools = policy
+        if tool_name in disabled_tools:
+            return False
+        group_name = _TOOL_GROUP_BY_NAME.get(tool_name)
+        return bool(group_switches.get(group_name, True)) if group_name is not None else True
 
     def _is_tool_group_enabled_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
-        cfg = self._group_config_for_event(event)
-        if not cfg:
-            return True
-        disabled_tools = cfg.get("disabled_tools", [])
-        if isinstance(disabled_tools, str):
-            disabled_tools = [x.strip() for x in disabled_tools.replace("，", ",").split(",") if x.strip()]
-        if tool_name in {str(x).strip() for x in disabled_tools if str(x).strip()}:
-            return False
-        group_switches = cfg.get("tool_groups", {})
-        if not isinstance(group_switches, dict):
-            return True
-        for group_name, tool_names in TOOL_GROUPS.items():
-            if tool_name in tool_names:
-                return bool(group_switches.get(group_name, True))
-        return True
+        return self._is_tool_enabled_for_policy(self._group_policy_for_event(event), tool_name)
 
     def _is_tool_allowed_for_event(self, event: AstrMessageEvent, tool_name: str) -> bool:
-        # 分群工具开关对管理员也生效；管理员只绕过身份权限，不绕过工具禁用。
-        if not self._is_tool_group_enabled_for_event(event, tool_name):
+        # Administrators bypass identity checks, but still respect disabled tools.
+        policy = self._group_policy_for_event(event)
+        if not self._is_tool_enabled_for_policy(policy, tool_name):
             return False
         if event.is_admin():
             return True
-        return str(event.get_sender_id() or "").strip() in self._allowed_ids or self._is_group_extra_admin(event)
+        sender_id = str(event.get_sender_id() or "").strip()
+        return sender_id in self._allowed_ids or bool(policy and sender_id in policy[0])
 
     def _heal_inactivated_tools(self, tools: list) -> None:
         """__init__ 阶段：强启所有 devkit 工具 + DB 清理。"""
