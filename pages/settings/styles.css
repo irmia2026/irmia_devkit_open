@@ -12,8 +12,6 @@
   --glass-edge: rgba(245, 247, 255, .36);
   --glass-panel: rgba(18, 24, 45, .075);
   --glass-inner: rgba(255, 255, 255, .045);
-  --tool-row-glass: rgba(24, 31, 61, .64);
-  --tool-row-glass-hover: rgba(34, 43, 79, .74);
   --glass-fill: linear-gradient(135deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .035));
   --glass-fill-hover: linear-gradient(135deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .06));
   --glass-shadow: 0 8px 18px rgba(4, 8, 28, .16), inset 0 1px 0 rgba(255, 255, 255, .16);
@@ -175,18 +173,17 @@ h4 { font-size: 13px; font-weight: 600; }
 .group-filter-option:hover, .group-filter-option:focus-visible { border-color: var(--glass-edge); background: rgba(255, 255, 255, .14); outline: none; }
 .group-filter-option[aria-selected="true"] { background: rgba(255, 255, 255, .19); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28); }
 .group-filter-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
-.table-wrap { position: relative; max-height: 600px; overflow: auto; contain: layout paint; isolation: isolate; border: 0; border-radius: 0; background: rgba(14, 20, 42, .18); box-shadow: none; }
-.table-wrap::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; background: rgba(14, 20, 42, .18); backdrop-filter: blur(16px) saturate(1.08); -webkit-backdrop-filter: blur(16px) saturate(1.08); }
-table { position: relative; z-index: 1; width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; text-align: left; }
+.table-wrap { max-height: 600px; overflow: auto; contain: layout paint; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; text-align: left; }
 th { position: sticky; top: 0; z-index: 1; height: 40px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 650; }
 th, td { padding: var(--space-md) var(--space-lg); }
 th:nth-child(2), td:nth-child(2) { width: 132px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 th:last-child, td:last-child { width: 80px; text-align: right; }
-tbody tr { transition: background-color 200ms ease, transform 260ms var(--ease-out); }
-tbody tr > td { background: var(--tool-row-glass); background-clip: padding-box; }
+/* Share the shell's glass surface so tool rows do not add a tinted backdrop. */
+tbody tr > td { background: transparent; transition: background-color 180ms ease; }
 tbody tr > td:first-child { border-radius: 13px 0 0 13px; }
 tbody tr > td:last-child { border-radius: 0 13px 13px 0; }
-tbody tr:hover > td { background: var(--tool-row-glass-hover); }
+tbody tr:hover > td, tbody tr:focus-within > td { background: var(--surface-soft); }
 .tool-cell { min-width: 0; }
 .tool-cell strong { display: block; overflow-wrap: anywhere; font: 550 12px/1.5 "Cascadia Code", Consolas, "Microsoft YaHei", monospace; }
 .tool-cell small { display: block; margin-top: var(--space-xs); color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
