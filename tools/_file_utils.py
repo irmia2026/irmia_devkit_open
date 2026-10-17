@@ -224,6 +224,21 @@ def is_binary_file(path: str | Path, sample_size: int = 8192) -> tuple[bool, str
     return False, "unknown"
 
 
+def _forbidden_hit(path_str: str, forbidden: str) -> bool:
+    """判断已规范化的绝对路径（统一正斜杠）是否位于黑名单条目内。
+
+    黑名单条目可能带反斜杠（Windows 风格），先归一化再按
+    "前缀 + /" 匹配，大小写不敏感 —— 供 _check_path_safety /
+    safe_write._check_forbidden / file_remove 共用同一份判定，
+    避免多处实现口径漂移（如 file_remove 漏归一化会导致
+    Windows 风格条目静默漏拦）。
+    """
+    forbidden_norm = forbidden.replace("\\", "/")
+    low = path_str.lower()
+    forbidden_low = forbidden_norm.lower()
+    return low.startswith(forbidden_low + "/") or low == forbidden_low
+
+
 def _custom_workspace_root() -> str | None:
     """读取配置的 custom_workspace（自定义工作区目录）。
 
@@ -250,8 +265,10 @@ def custom_workspace_allows(path_str: str) -> bool:
     """判断已规范化的绝对路径（统一正斜杠）是否位于自定义工作区内。
 
     未配置时恒为 False —— 默认行为与未引入本功能前完全一致。
-    边界按 "前缀 + /" 匹配，/x/workspace-evil 不会被 /x/workspace 误放行；
-    比对大小写不敏感（与 _FORBIDDEN_PREFIXES 判定方式一致）。
+    边界按 "前缀 + /" 匹配，/x/workspace-evil 不会被 /x/workspace 误放行。
+    比对大小写不敏感是**刻意取舍**（与 _FORBIDDEN_PREFIXES 判定口径一致）：
+    在大小写敏感的文件系统（Linux）上，仅大小写不同的路径也会被放行，
+    与黑名单拦截的既有行为对称，并非疏漏。
     """
     ws = _custom_workspace_root()
     if not ws:
@@ -280,8 +297,7 @@ def _check_path_safety(path: str | Path, *, read: bool = True) -> dict | None:
         return None
 
     for forbidden in _FORBIDDEN_PREFIXES:
-        forbidden_norm = forbidden.replace("\\", "/")
-        if path_str.lower().startswith(forbidden_norm.lower() + "/") or path_str.lower() == forbidden_norm.lower():
+        if _forbidden_hit(path_str, forbidden):
             return {
                 "ok": False,
                 "error": f"禁止访问系统目录: {p}",

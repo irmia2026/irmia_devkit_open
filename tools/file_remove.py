@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 from ._helpers import proposal_reply
-from ._file_utils import human_size
+from ._file_utils import human_size, _forbidden_hit
 
 _FORBIDDEN_PREFIXES = [
     "C:/Windows/System32", "C:/Windows/SysWOW64",
@@ -38,7 +38,7 @@ def remove(path: str, confirm: bool = False, max_items: int = 50) -> dict:
 
     path_str = str(p).replace("\\", "/")
     for forbidden in _FORBIDDEN_PREFIXES:
-        if path_str.lower().startswith(forbidden.lower() + "/") or path_str.lower() == forbidden.lower():
+        if _forbidden_hit(path_str, forbidden):
             return {"ok": False, "error": f"禁止操作系统目录: {path}",
                     "proposal": "路径位于受保护的系统目录中，删除操作已被拦截。",
                     "evidence": {"path": path, "blocked_by": forbidden}}
@@ -116,7 +116,7 @@ def _check_path(path: str) -> dict | None:
     p = Path(path).resolve()
     path_str = str(p).replace("\\", "/")
     for forbidden in _FORBIDDEN_PREFIXES:
-        if path_str.lower().startswith(forbidden.lower() + "/") or path_str.lower() == forbidden.lower():
+        if _forbidden_hit(path_str, forbidden):
             return {"ok": False, "error": f"禁止操作系统目录: {p}",
                     "proposal": "路径位于受保护的系统目录中，操作已被拦截。",
                     "evidence": {"path": str(p), "blocked_by": forbidden}}

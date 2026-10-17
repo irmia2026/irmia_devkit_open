@@ -18,6 +18,7 @@ from tools._file_utils import (
     check_path_allowed,
     custom_workspace_allows,
     _custom_workspace_root,
+    _forbidden_hit,
 )
 from tools.file_diff import compare as file_diff
 from tools.file_hash import compute as file_hash
@@ -50,9 +51,15 @@ def blacklist(danger_dirs, monkeypatch):
     """把两个临时目录追加进黑名单，平台无关地模拟"工作区位于危险区域"。
 
     保留原始 _FORBIDDEN_PREFIXES —— 真实系统目录（/etc 等）在测试中同样生效。
+    临时目录统一正斜杠归一化：Windows 下 str(Path) 是反斜杠格式，而
+    file_remove 侧的黑名单比对（与 _file_utils 不同）历史上不做条目归一化，
+    反斜杠条目会静默失配导致"期望拦截却放行"。
     """
     ws_dir, evil_dir = danger_dirs
-    fake = [str(ws_dir.resolve()), str(evil_dir.resolve())] + list(_file_remove_mod._FORBIDDEN_PREFIXES)
+    fake = [
+        str(ws_dir.resolve()).replace("\\", "/"),
+        str(evil_dir.resolve()).replace("\\", "/"),
+    ] + list(_file_remove_mod._FORBIDDEN_PREFIXES)
     # _file_utils._check_path_safety 在函数内 import、file_remove 走模块全局，
     # patch 模块属性即可；safe_write 是模块级 from-import，需单独 patch。
     monkeypatch.setattr(_file_remove_mod, "_FORBIDDEN_PREFIXES", fake)
@@ -288,3 +295,20 @@ class TestWorkspaceHelpers:
         assert custom_workspace_allows(ws_norm.upper() + "/A.PY") is True
         evil_norm = str(evil_dir.resolve()).replace("\\", "/")
         assert custom_workspace_allows(evil_norm + "/a.py") is False
+
+    def test_forbidden_hit_normalizes_entries(self):
+        """共用黑名单判定：条目统一正斜杠归一化 + 大小写不敏感 + 前缀边界。
+
+        锁定 review 指出的隐患 —— Windows 反斜杠风格条目在各调用方
+        （含历史上不归一化的 file_remove 侧）都能正确命中。
+        """
+        # Windows 反斜杠条目 → 归一化后命中（path_str 按契约已统一正斜杠）
+        assert _forbidden_hit("c:/windows/system32/x.dll", "C:\\Windows\\System32") is True
+        assert _forbidden_hit("C:/Program Files/app/x.exe", "C:\\Program Files") is True
+        # 前缀边界：Program Files (x86) 不被 Program Files 误放
+        assert _forbidden_hit("C:/Program Files (x86)/app/x.exe", "C:/Program Files") is False
+        # POSIX 风格
+        assert _forbidden_hit("/usr/local/bin/t", "/usr") is True
+        assert _forbidden_hit("/usrlocal/bin/t", "/usr") is False
+        assert _forbidden_hit("/etc", "/etc") is True
+        assert _forbidden_hit("/etcx/t", "/etc") is False

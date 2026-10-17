@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .syntax_check import check as syntax_check
-from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem, prune_backups, custom_workspace_allows
+from ._file_utils import read_file_with_encoding, human_size, SAFE_EDIT_MAX_SIZE, atomic_write_text, _first_existing_parent, backup_name_stem, prune_backups, custom_workspace_allows, _forbidden_hit
 from .safe_edit import _backup_dir
 from .file_remove import _FORBIDDEN_PREFIXES
 
@@ -58,8 +58,7 @@ def _check_forbidden(p: Path, raw: str) -> dict | None:
     if custom_workspace_allows(path_str):
         return None
     for forbidden in _FORBIDDEN_PREFIXES:
-        forbidden_norm = forbidden.replace("\\", "/")
-        if path_str.lower().startswith(forbidden_norm.lower() + "/") or path_str.lower() == forbidden_norm.lower():
+        if _forbidden_hit(path_str, forbidden):
             return {
                 "ok": False,
                 "error": f"禁止写入系统目录: {p}",
